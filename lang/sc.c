@@ -231,7 +231,7 @@ struct lexer_t {
 /* --------  LEXER_UTIL -------- */
 
 char char_next(FILE *file) {
-  int c  = fgetc(file);
+  int c = fgetc(file);
   if(c == EOF) {
     fclose(file);
     panic("end of file");
@@ -379,13 +379,17 @@ struct token_t *lexer_next(struct lexer_t *this) {
   this->current = res;           \
   return res;                    \
 }
+  
+  // return 0 on eof
+  if(char_peek(this->in) == EOF) return (struct token_t*)0;
+
   // if token is already on from stack
   // return it immediately
   if((res = stack_pop(&this->from))) set_res();
   
   // ignore all whitespaces, newlines, tabs, etc.
   char *skip_set = " \n\r\t";
-  if(char_skip(this->in, skip_set) == -1) return (struct token_t*) 0;
+  if(char_skip(this->in, skip_set) == -1) return (struct token_t*)0;
 
   // parser all tokens in order 
   // operators -> keywords -> identifier -> integer -> float -> string
@@ -452,17 +456,28 @@ void parse(FILE *in, FILE *out) {
 //---------------------------------------
 
 int main(int argc, char **argv) {
+  printf("+---------------------------+\n");
   printf("| Starting SC-Lang Compiler |\n");
   printf("| Author:  Gerrit Proessl   |\n");
   printf("| Version: 0.0.1            |\n");
+  printf("+---------------------------+\n");
+  
+  FILE *in = 0;
+  FILE *out = stdout;
+  
+  if(argc >= 3) {
+    out = fopen(argv[2], "w");
+    if(!out) panic("unable to open output file");
+  }
  
   if(argc >= 2) {
-    FILE *file = fopen(argv[1], "r");
-    if(!file) panic("unable to open input file");
-    parse(file, stdout);
-    fclose(file);
+    in = fopen(argv[1], "r");
+    if(!in) panic("unable to open input file");
+    parse(in, stdout);
+    fclose(in);
+    if(out != stdout) fclose(out);
   } else {
-    parse(stdin, stdout);
+    panic("no input or output file specified");
   }
 
   return 0;
