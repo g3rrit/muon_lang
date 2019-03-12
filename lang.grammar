@@ -10,31 +10,41 @@ file : /* empty */
 // STRUCT 
 //---------------------------------------
 
-struct : struct_opt }
+struct : id { struct' }
        ;
 
-struct_opt : id { 
-           | struct_opt var ;
-           ;
+struct' : var ; struct'
+        | /* empty */
+        ;
 
 //---------------------------------------
 // STATEMENT
 //---------------------------------------
 
-stm : if exp stm_block
-    | while exp stm_block
+stm : con_stm
+    | while exp stm_lst
     | exp ;
     | struct ;
     | var ;
     | var = exp ;
+    | ;
     ;
- 
-stm_block : stm_block_opt }
-          ;
+    
+con_stm : if exp stm_lst con_stm'
+        ;
 
-stm_block_opt : {
-              | stm_block_opt stm
-              ;
+con_stm' : elif exp stm_lst
+         | elif exp 
+         | else stm_lst
+         | /* empty */
+         ;
+ 
+stm_lst : { stm_lst' }
+        ;
+        
+stm_lst' : stm stm_lst'
+         | /* empty */
+         ;
               
 //---------------------------------------
 // VARIABLE
@@ -47,22 +57,26 @@ var : id : type
 // TYPE
 //---------------------------------------
 
-type : int
-     | float
-     | type *
+type : id type'
+     | int type'
+     | float type'
      | [type; exp]
      | function_type 
      ;
      
+type' : * type'
+      | /* empty */
+      ;
+     
 function_type : ( )
               | ( ) -> type
-              | function_type_opt )
-              | function_type_opt ) -> type
+              | ( function_type' )
+              | ( function_type' ) -> type
               ;
 
-function_type_opt : ( type
-                  | function_type_opt , type
-                  ;
+function_type' : type , function_type'
+               | type
+               ;
 
 //---------------------------------------
 // FUNCTION
@@ -70,40 +84,37 @@ function_type_opt : ( type
 
 function : id ( ) stm_block
          | id ( ) -> type stm_block
-         | function_opt ) stm_block
-         | function_opt ) -> type stm_block
+         | id ( function' ) stm_block
+         | id ( function' ) -> type stm_block
          ;
 
-function_opt : id ( var
-             | function_opt , var
-             ;
+function' : var , function'
+          | var
 
 //---------------------------------------
 // EXPRESSION 
 //---------------------------------------
 
-compound_l : compound_lit_opt }
+compound_l : ( type ) { compound_l' }
            ;
+           
+compount_l' : . id = exp , compound_l'
+            | exp , compound_l'
+            | . id = exp
+            | exp 
+            ;
 
-compound_l_opt : ( type ) { . id = exp
-                 | ( type ) { exp
-                 | compound_lit_opt , . id = exp
-                 | compound_lit_opt , exp
-                 ;
-
-exp : int_l
-    | float_l
-    | string_l
-    | id 
-    | compound_l
-    | sizeof ( type )
-    | sizeof ( exp )
-    // -- 1 - ltr
-    | exp . id
-    | exp -> id
-    | exp ++
-    | exp --
-    // -- 2 - rtl
+p_exp : int_l
+      | float_l
+      | string_l
+      | id
+      | compound_l
+      | sizeof ( type )
+      | sizeof ( exp )
+      ;
+      
+exp : p_exp exp'
+    | ( exp )
     | ++ exp
     | -- exp
     | + exp
@@ -113,55 +124,40 @@ exp : int_l
     | ( type ) exp
     | * exp
     | & exp
-    // -- 3 - ltr
-    | exp * exp
-    | exp / exp
-    | exp % exp
-    // -- 4 - ltr
-    | exp + exp
-    | exp - exp
-    // -- 5 - ltr
-    | exp << exp
-    | exp >> exp
-    // -- 6 - ltr
-    | exp < exp
-    | exp > exp
-    | exp <= exp
-    | exp >= exp
-    // -- 7 - ltr
-    | exp == exp
-    | exp != exp
-    // -- 8 - ltr
-    | exp & exp
-    // -- 9 - ltr
-    | exp ^ exp
-    // -- 10 - ltr
-    | exp | exp
-    // -- 11 - ltr
-    | exp && exp
-    // -- 12 - ltr
-    | exp || exp
-    // -- 13 - rtl
-    | exp ? exp : exp
-    // -- 14 - rtl
-    | exp = exp
-    | exp += exp
-    | exp -= exp
-    | exp *= exp 
-    | exp /= exp
-    | exp %= exp
-    | exp <<= exp
-    | exp >>= exp
-    | exp &= exp
-    | exp ^= exp
-    | exp |= exp
-    // -- 15 - ltr
-    | compound_exp
     ;
 
-compount_exp : compound_exp_opt )
-             ;
-
-compound_exp_opt : ( exp
-                 | compound_exp_opt , exp
-                 ;
+exp' : . id exp'
+     | -> id exp'
+     | * exp exp'
+     | / exp exp'
+     | % exp exp'
+     | + exp exp'
+     | - exp exp'
+     | << exp exp'
+     | >> exp exp'
+     | < exp exp'
+     | > exp exp'
+     | <= exp exp'
+     | >= exp exp'
+     | == exp exp'
+     | != exp exp'
+     | & exp exp'
+     | ^ exp exp'
+     | | exp exp'
+     | && exp exp'
+     | || exp exp'
+     | ? exp : exp exp'
+     | = exp exp'
+     | += exp exp'
+     | -= exp exp'
+     | *= exp exp'
+     | /= exp exp'
+     | %= exp exp'
+     | <<= exp exp'
+     | >>= exp exp'
+     | &= exp exp'
+     | ^= exp exp'
+     | |= exp exp'
+     | , exp exp' 
+     | /* empty */ 
+     ;
