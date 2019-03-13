@@ -128,6 +128,8 @@ exp : p_exp exp'
 
 exp' : . id exp'
      | -> id exp'
+     | [ exp ] exp'
+     | ( arg_lst ) exp'
      | * exp exp'
      | / exp exp'
      | % exp exp'
@@ -161,3 +163,7 @@ exp' : . id exp'
      | , exp exp' 
      | /* empty */ 
      ;
+     
+arg_lst : exp , arg_lst
+        | exp
+        ;

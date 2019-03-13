@@ -68,10 +68,6 @@ void *stack_pop(struct stack_t **this) {
 }
 
 //---------------------------------------
-// OBJ
-//---------------------------------------
-
-//---------------------------------------
 // TOKEN
 //---------------------------------------
 
@@ -228,7 +224,7 @@ struct lexer_t {
   struct stack_t *from;
 };
 
-/* --------  LEXER_UTIL -------- */
+// -- LEXER_UTIL ------------------------
 
 char char_next(FILE *file) {
   int c = fgetc(file);
@@ -288,7 +284,8 @@ int is_str(char _c) {
   return (struct token_t*)0;          \
 }
 
-/* --------  LEXER_FUNCTIONS -------- */
+// -- LEXER_FUNCTIONS -------------------
+
 struct token_t *lexer_identifier(FILE *in) {
   int rc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
@@ -358,7 +355,7 @@ struct token_t *lexer_keyword(FILE *in, int is_op, char *key, enum token_type_e 
   return token_new(type);
 }
 
-/* --------  --------------- -------- */
+// --  ----------------------------------
 
 void lexer_crt(struct lexer_t *this, FILE *in) {
   this->in      = in;
@@ -428,6 +425,40 @@ void lexer_clear(struct lexer_t *this) {
 }
 
 //---------------------------------------
+// AST_TYPES
+//---------------------------------------
+
+// -- STRUCT ----------------------------
+
+struct struct_t {
+};
+
+// -- VARIABLE --------------------------
+
+struct var_t {
+};
+
+// -- FUNCTION --------------------------
+
+struct function_t {
+};
+
+// -- STATEMENT -------------------------
+
+struct stm_t {
+};
+
+// -- TYPE ------------------------------
+
+struct type_t {
+};
+
+// -- EXPRESSION ------------------------
+
+struct exp_t {
+};
+
+//---------------------------------------
 // PARSER 
 //---------------------------------------
 
@@ -437,6 +468,15 @@ struct parser_t {
   
   struct lexer_t lexer;
 };
+
+int parse_struct(struct parser_t *this) {
+}
+
+int parse_var(struct parser_t *this) {
+}
+
+int parser_global(struct parser_t *this) {
+}
 
 void parse(FILE *in, FILE *out) {
   struct parser_t parser;
