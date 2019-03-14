@@ -439,6 +439,10 @@ struct type_t;
 struct arr_type_t;
 struct fun_type_t;
 struct exp_t;
+struct bin_exp_t;
+struct ter_exp_t;
+struct cast_exp_t;
+struct comp_exp_t;
 
 // -- STRUCT ----------------------------
 
@@ -475,6 +479,7 @@ struct function_t {
 
 enum stm_type_e {
 #define X(tok) tok,
+STM_LIST
 #undef X
 };
 
@@ -500,25 +505,26 @@ struct var_stm_t {
 
 // -- TYPE ------------------------------
 
-#define TYPE_LIST        \
-  X(I8_T)                \
-  X(U8_T)                \
-  X(I16_T)               \
-  X(U16_T)               \
-  X(I32_T)               \
-  X(U32_T)               \
-  X(I64_T)               \
-  X(U64_T)               \
-  X(F32_T)               \
-  X(F64_T)               \
-  X(VOID_T)              \
-  X(ID_T)  /* token_t */ \
-  X(ARR_T)               \
-  X(FUN_T)               \
-  X(REF_T) /* type_t */
+#define TYPE_LIST            \
+  X(I8_T)   /* empty      */ \
+  X(U8_T)   /* empty      */ \
+  X(I16_T)  /* empty      */ \
+  X(U16_T)  /* empty      */ \
+  X(I32_T)  /* empty      */ \
+  X(U32_T)  /* empty      */ \
+  X(I64_T)  /* empty      */ \
+  X(U64_T)  /* empty      */ \
+  X(F32_T)  /* empty      */ \
+  X(F64_T)  /* empty      */ \
+  X(VOID_T) /* empty      */ \
+  X(ID_T)   /* token_t    */ \
+  X(ARR_T)  /* arr_type_t */ \
+  X(FUN_T)  /* fun_type_t */ \
+  X(REF_T)  /* type_t     */
 
 enum type_type_e {
 #define X(tok) tok,
+TYPE_LIST
 #undef X
 };
 
@@ -539,60 +545,89 @@ struct fun_type_t {
 
 // -- EXPRESSION ------------------------
 
-#define EXP_LIST \
+#define EXP_LIST                                           \
   X(COMP_EXP)    /* (type) { exp, ... } | comp_exp_t */ \
-  X(INT_EXP)     /* 10 */ \
-  X(FLOAT_EXP)   /* 10.0 */ \
-  X(STRING_EXP)  /* "str" */\
-  X(ID_EXP)      /* x */\
-  X(SIZEOF_EXP)  /* sizeof(type) */ \
-  X(BRACKET_EXP) /* ( exp ) */ \
-  X(INC_EXP)     /* ++ exp */ \
-  X(DEC_EXP)     /* -- exp */ \
-  X(POS_EXP)     /* + exp */ \
-  X(MIN_EXP)     /* - exp */ \
-  X(NOT_EXP)     /* ! exp */ \
-  X(BIT_NOT_EXP) /* ~ exp */ \
-  X(CAST_EXP)    /* ( type ) exp */ \
-  X(DEREF_EXP)   /* * exp */ \
-  X(REF_EXP)     /* & exp */ \
-  X(DOT_EXP)     /* exp . exp */ \
-  X(ARROW_EXP)   /* exp -> exp */ \
-  X(ARR_EXP)     /* exp [ exp ] */ \
-  X(CALL_EXP)    /* exp ( exp, ... ) */ \
-  X(MULT_EXP)    /* exp * exp */ \
-  X(DIV_EXP)     /* exp / exp */ \
-  X(MOD_EXP)     /* exp % exp */ \
-  X(ADD_EXP)     /* exp + exp */ \
-  X(SUB_EXP)     /* exp - exp */ \
-  X(LS_EXP)      /* exp << exp */ \
-  X(RS_EXP)      /* exp >> exp */ \
-  X(LT_EXP)      /* exp < exp */ \
-  X(GT_EXP)      /* exp > exp */ \
-  X(LE_EXP)      /* exp <= exp */ \
-  X(GE_EXP)      /* exp >= exp */ \
-  X(EQ_EXP)      /* exp == exp */ \
-  X(NE_EXP)      /* exp != exp */ \
-  X(BIT_AND_EXP) /* exp & exp */ \
-  X(BIT_XOR_EXP) /* exp ^ exp */ \
-  X(BIT_OR_EXP)  /* exp | exp */ \
-  X(AND_EXP)     /* exp && exp */ \
-  X(OR_EXP)      /* exp || exp */ \
-  X(TER_EXP)     /* exp ? exp : exp */ \
-  X(ASG_EXP)     /* exp = exp */ \
-  X(ADDA_EXP)    /* exp += exp */ \
-  X(SUBA_EXP)    /* exp += exp */ \
-  X(MULTA_EXP)   /* exp *= exp */ \
-  X(DIVA_EXP)    /* exp /= exp */ \
-  X(MODA_EXP)    /* exp %= exp */ \
-  X(LSA_EXP)     /* exp <<= exp */ \
-  X(RSA_EXP)     /* exp >>= exp */ \
-  X(ANDA_EXP)    /* exp &= exp */ \
-  X(XORA_EXP)    /* exp ^= exp */ \
-  X(ORA_EXP)     /* exp |= exp */ \
-  X(COMMA_EXP)   /* exp , exp */ 
+  X(INT_EXP)     /* 10                  | token_t    */ \
+  X(FLOAT_EXP)   /* 10.0                | token_t    */ \
+  X(STRING_EXP)  /* "str"               | token_t    */ \
+  X(ID_EXP)      /* x                   | token_t    */ \
+  X(SIZEOF_EXP)  /* sizeof(type)        | type_t     */ \
+  X(BRACKET_EXP) /* ( exp )             | exp_t      */ \
+  X(INC_EXP)     /* ++ exp              | exp_t      */ \
+  X(DEC_EXP)     /* -- exp              | exp_t      */ \
+  X(POS_EXP)     /* + exp               | exp_t      */ \
+  X(MIN_EXP)     /* - exp               | exp_t      */ \
+  X(NOT_EXP)     /* ! exp               | exp_t      */ \
+  X(BIT_NOT_EXP) /* ~ exp               | exp_t      */ \
+  X(CAST_EXP)    /* ( type ) exp        | cast_exp_t */ \
+  X(DEREF_EXP)   /* * exp               | exp_t      */ \
+  X(REF_EXP)     /* & exp               | exp_t      */ \
+  X(DOT_EXP)     /* exp . exp           | bin_exp_t  */ \
+  X(ARROW_EXP)   /* exp -> exp          | bin_exp_t  */ \
+  X(ARR_EXP)     /* exp [ exp ]         | bin_exp_t  */ \
+  X(CALL_EXP)    /* exp ( exp, ... )    | stack_t    */ \
+  X(MULT_EXP)    /* exp * exp           | bin_exp_t  */ \
+  X(DIV_EXP)     /* exp / exp           | bin_exp_t  */ \
+  X(MOD_EXP)     /* exp % exp           | bin_exp_t  */ \
+  X(ADD_EXP)     /* exp + exp           | bin_exp_t  */ \
+  X(SUB_EXP)     /* exp - exp           | bin_exp_t  */ \
+  X(LS_EXP)      /* exp << exp          | bin_exp_t  */ \
+  X(RS_EXP)      /* exp >> exp          | bin_exp_t  */ \
+  X(LT_EXP)      /* exp < exp           | bin_exp_t  */ \
+  X(GT_EXP)      /* exp > exp           | bin_exp_t  */ \
+  X(LE_EXP)      /* exp <= exp          | bin_exp_t  */ \
+  X(GE_EXP)      /* exp >= exp          | bin_exp_t  */ \
+  X(EQ_EXP)      /* exp == exp          | bin_exp_t  */ \
+  X(NE_EXP)      /* exp != exp          | bin_exp_t  */ \
+  X(BIT_AND_EXP) /* exp & exp           | bin_exp_t  */ \
+  X(BIT_XOR_EXP) /* exp ^ exp           | bin_exp_t  */ \
+  X(BIT_OR_EXP)  /* exp | exp           | bin_exp_t  */ \
+  X(AND_EXP)     /* exp && exp          | bin_exp_t  */ \
+  X(OR_EXP)      /* exp || exp          | bin_exp_t  */ \
+  X(TER_EXP)     /* exp ? exp : exp     | ter_exp_t  */ \
+  X(ASG_EXP)     /* exp = exp           | bin_exp_t  */ \
+  X(ADDA_EXP)    /* exp += exp          | bin_exp_t  */ \
+  X(SUBA_EXP)    /* exp += exp          | bin_exp_t  */ \
+  X(MULTA_EXP)   /* exp *= exp          | bin_exp_t  */ \
+  X(DIVA_EXP)    /* exp /= exp          | bin_exp_t  */ \
+  X(MODA_EXP)    /* exp %= exp          | bin_exp_t  */ \
+  X(LSA_EXP)     /* exp <<= exp         | bin_exp_t  */ \
+  X(RSA_EXP)     /* exp >>= exp         | bin_exp_t  */ \
+  X(ANDA_EXP)    /* exp &= exp          | bin_exp_t  */ \
+  X(XORA_EXP)    /* exp ^= exp          | bin_exp_t  */ \
+  X(ORA_EXP)     /* exp |= exp          | bin_exp_t  */ \
+  X(COMMA_EXP)   /* exp , exp           | bin_exp_t  */ 
+  
+enum exp_type_e {
+#define X(tok) tok,
+EXP_LIST
+#undef X
+};
 
 struct exp_t {
+  enum exp_type_e exp_type;
+  void            *exp;
+};
+
+struct bin_exp_t {
+  struct exp_t *f;
+  struct exp_t *s;
+};
+
+struct ter_exp_t {
+  struct exp_t *f;
+  struct exp_t *s;
+  struct exp_t *t;
+};
+
+struct cast_exp_t {
+  struct type_t *type;
+  struct exp_t  *exp;
+};
+
+struct comp_exp_t {
+  struct type_t  *type;
+  struct stack_t *vals;
 };
 
 //---------------------------------------
