@@ -21,10 +21,6 @@ void panic(char *msg) {
 // UTILITY 
 //---------------------------------------
 
-void emit(FILE *out, char *str) {
-  fprintf(out, "%s", str);
-}
-
 char *str_new(char *str) {
   char *res = malloc(strlen(str) + 1);
   strcpy(res, str);
@@ -67,6 +63,26 @@ void *stack_pop(struct stack_t **this) {
   return res;
 }
 
+void stack_inverse(struct stack **this) {
+  struct stack_t *prev = *this;
+  struct stack_t *curr = *this->next;
+  prev->next = 0;
+  for(; curr; curr = curr->next) {
+    curr->next = prev;
+    prev = curr;
+  }
+  *this = prev;
+}
+
+#define stack_free(stack, free_fun) {                          \
+  for(void *obj = 0; (obj = stack_pop(stack)); free_fun(obj)); \
+}
+
+// this macro also destroyes the stack
+#define stack_for_each(stack, block) {                    \
+  for(void *obj = 0; (obj = stack_pop(stack));) { block } \
+}
+
 //---------------------------------------
 // TOKEN
 //---------------------------------------
@@ -81,6 +97,16 @@ void *stack_pop(struct stack_t **this) {
   X(IF,       "if")       \
   X(WHILE,    "while")    \
   X(SIZEOF,   "sizeof")   \
+  X(i8),      "i8")       \
+  X(u8),      "u8")       \
+  X(i16),     "i16")      \
+  X(u16),     "u16")      \
+  X(i32),     "i32")      \
+  X(u32),     "u32")      \
+  X(i64),     "i64")      \
+  X(u64),     "u64")      \
+  X(f32),     "f32")      \
+  X(f64),     "f64")      \
   X(VOID,     "void") 
 
 #define OP_LIST          \
@@ -161,6 +187,14 @@ struct token_t *token_new(enum token_type_e type) {
   return res;
 }
 
+void token_free(struct token_t *this) {
+  if(!this) return;
+  if(this->token_type == ID || this->token_type == STRING) {
+    free(this->str_val);
+  }
+  free(this);
+}
+
 struct token_t *token_new_str(enum token_type_e type, char *str) {
   struct token_t *res = token_new(type);
   res->str_val = str;
@@ -182,6 +216,10 @@ struct token_t *token_new_float(enum token_type_e type, float val) {
 struct token_t *token_copy(struct token_t *this) {
   struct token_t *res = malloc(sizeof(struct token_t));
   memcpy(res, this, sizeof(struct token_t));
+  if(this->token_type == ID || this->token_type == STRING) {
+    res->str_val = malloc(strlen(this->str_val));
+    strcpy(res->str_val, this->str_val);
+  }
   return res;
 }
 
@@ -421,7 +459,76 @@ struct token_t *lexer_peek(struct lexer_t *this) {
 }
 
 void lexer_clear(struct lexer_t *this) {
-  for(void *obj = 0; (obj = stack_pop(&this->stack)); free(obj));
+  stack_free(&this->stack, token_free);
+}
+
+//---------------------------------------
+// EMIT_UTIL 
+//---------------------------------------
+
+#define EOL "\r\n"
+
+#define emit(out, ...) {     \
+  fprintf(out, __VA_ARGS__); \
+}
+
+#define emit_line(out, ...) { \
+  fprintf(out, __VA_ARGS__);  \
+  fprintf(out, EOL);          \
+}
+
+//---------------------------------------
+// PARSER 
+//---------------------------------------
+
+struct parser_t {
+  FILE *in;
+  FILE *out;
+  
+  struct lexer_t lexer;
+};
+
+// A parser function has the structure
+// type *parse_type(struct parser_t *parser, int *rcr) { int rc = 0; }
+#define is_token(var, tok) \
+  (rc++, (var = lexer_next(&parser->lexer))->token_type == tok)
+
+#define parser_fail() {             \
+  lexer_rewind(&parser->lexer, rc); \
+  return 0;                         \
+}
+ 
+#define set_next_token(var, tok, on_fail) {                   \
+  rc++;                                                       \
+  if((var = lexer_next(&parser->lexer))->token_type != tok) { \
+    on_fail                                                   \
+    lexer_rewind(&parser->lexer, rc);                         \
+    return 0;                                                 \
+  }                                                           \
+}
+
+#define next_token(tok, on_fail) {                    \
+  rc++;                                               \
+  if(lexer_next(&parser->lexer)->token_type != tok) { \
+    on_fail                                           \
+    lexer_rewind(&parser->lexer, rc);                 \
+    return 0;                                         \
+  }                                                   \
+}
+
+#define token_peek(tok) (lexer_peek(&parser->lexer)->token_type == tok)
+
+void parse(FILE *in, FILE *out) {
+  struct parser_t parser;
+  parser.in  = in;
+  parser.out = out;
+  lexer_crt(&parser.lexer, in);
+  
+  struct token_t *token = 0;
+  for(;;) {
+    if(!(token = lexer_next(&parser.lexer))) break;
+    token_print(token);
+  }
 }
 
 //---------------------------------------
@@ -451,12 +558,100 @@ struct struct_t {
   struct stack_t *vars; // <var_t>
 };
 
+struct struct_new(struct token_t *id, struct stack_t *vars) {
+  struct struct_t *res = malloc(sizeof(struct struct_t));
+  res->id   = id;
+  res->vars = vars;
+  return res;
+}
+
+void struct_free(struct struct_t *this) {
+  if(!this) return;
+  token_free(this->id);
+  stack_free(&this->vars, var_free);
+  free(this);
+}
+
+void struct_emit(struct struct_t *this, FILE *out) {
+  emit_line(out, "struct %s {", this->id->str_val);
+  stack_for_each(&this->vars, {
+    var_emit(obj, out);
+    emit_line(out, ";");
+  });
+  emit_line(out, "};");
+  token_free(this->id);
+  free(this);
+}
+
+struct struct_t *parse_struct(struct parser_t *parser, int *rcr) {
+  int rc = 0;
+  struct token_t *id = 0;
+  struct stack_t *vars = 0;
+  struct var_t   *var = 0;
+
+#define VS_F stack_free(&vars, var_free);
+
+  set_next_token(id, ID, {});
+  next_token(L_C_B, {});
+  while(!token_peek(R_C_B)) {
+    if(!(var = var_parse(parser, &rc))) {
+      VS_F
+      parser_fail();
+    }
+    stack_push(&vars, var);
+  }
+  stack_inverse(&vars);
+  next_token(R_C_B, { VS_F });
+
+#undef VS_F
+  
+  *rcr += rc;
+  return struct_new(token_copy(id), vars);
+};
+
 // -- VARIABLE --------------------------
 
 struct var_t {
   struct token_t *id;
   struct type_t  *type;
 };
+
+struct var_new(struct token_t *id, struct type_t *type) {
+  struct var_t *res = malloc(sizeof(struct var_t));
+  res->id   = id;
+  res->type = type;
+  return res;
+}
+
+void var_free(struct var_t *this) {
+  if(!this) return;
+  token_free(this->id);
+  type_free(this->type);
+  free(this);
+}
+
+void var_emit(struct var_t *this, FILE *out) {
+  type_emit_head(this->type, out);
+  emit(out, " %s", this->id->str_val);
+  type_emit_tail(this->type, out);
+  token_free(this->id);
+  free(this);
+}
+
+struct var_t *parse_var(struct parser_t *parser, int *rcr) {
+  int rc = 0;
+  struct token_t *id = 0;
+  struct type_t  *type = 0;
+
+  set_next_token(id, ID, {});
+  next_token(COLON, {});
+  if(!(type = parse_type(parser, &rc))) {
+    parser_fail();
+  }
+
+  *rcr += rc;
+  return var_new(token_copy(id), type); 
+}
 
 // -- FUNCTION --------------------------
 
@@ -467,6 +662,95 @@ struct function_t {
   struct stack_t *stms;   // <stm_t>
 };
 
+struct function_t *function_new(struct token_t *id, struct type_t *type, struct stack_t *params, struct stack_t *stms) {
+  struct function_t *res = malloc(sizeof(struct function_t));
+  res->id     = id;
+  res->type   = type;
+  res->params = params;
+  res->stms   = stms;
+  return res;
+}
+
+void function_free(struct function_t *this) {
+  if(!this) return;
+  token_free(this->id);
+  type_free(this->type);
+  stack_free(this->params, var_free);
+  stack_free(this->stms, stm_free);
+  free(this);
+}
+
+void function_emit(struct function_t *this, FILE *out) {
+  type_emit_head(this->type, out);
+  emit(out, " %s(", this->id->str_val);
+  stack_for_each(&this->params, {
+    var_emit(obj, out);
+    emit(out, ", ");
+  });
+  emit(out, ")");
+  type_emit_tail(this->type, out);
+  stm_lst_emit(this->stms, out);
+  token_free(this->id);
+  free(this);
+}
+
+struct function_t *parse_function(struct parser_t *parser, int *rcr) {
+  int rc = 0;
+  struct token_t *id = 0;
+  struct type_t  *type = 0;
+  struct var_t   *var = 0;
+  struct stack_t *params = 0;
+  struct stm_t   *stm = 0;
+  struct stack_t *stms = 0;
+ 
+#define T_F  type_free(type);
+#define PS_F stack_free(&params, var_free);
+  
+  set_next_token(id, ID, {});
+  next_token(L_R_B, {});
+  while(!token_peek(R_R_B)) {
+    if(!(var = parse_var(parser, &rc))) {
+      PS_F
+      parser_fail();
+    }
+    stack_push(&params, var);
+  }
+  stack_inverse(&params);
+  next_token(R_R_B, { PS_F });
+  
+  if(token_peek(ARROW)) {
+    next_token(ARROW, { PS_F });
+    if(!(type = parse_type(parser, &rc))) {
+      PS_F
+      parser_fail()
+    }
+  } else {
+    type = type_new(VOID_T, 0);
+  }
+
+  if(!(stms = parse_stm_lst(parser, &rc))) {
+    PS_F T_F
+    parser_fail();
+  }
+  /*
+  next_token(L_C_B, { PS_F T_F });
+  while(!token_peek(R_C_B)) {
+    if(!(stm = parse_stm(parser, &rc))) {
+      PS_F T_F SS_F
+      parser_fail();
+    }
+    stack_push(&stms, stm);
+  }
+  next_token(R_C_B, { PS_F T_F SS_F });
+  */
+ 
+#undef T_F
+#undef PF_F
+  
+  *rcr += rc;
+  return function_new(token_copy(id), type, params, stms);
+}
+
 // -- STATEMENT -------------------------
 
 #define STM_LIST                          \
@@ -475,7 +759,7 @@ struct function_t {
   X(STRUCT_STM)  /* struct_t           */ \
   X(EXP_STM)     /* exp_t              */ \
   X(VAR_STM)     /* var_stm_t          */ \
-  X(LST_STM)     /* stack_t            */ 
+  X(LST_STM)     /* stack_t<stm_t>     */ 
 
 enum stm_type_e {
 #define X(tok) tok,
@@ -502,6 +786,112 @@ struct var_stm_t {
   struct var_t *var;
   struct exp_t *val;
 };
+
+struct stm_t *stack_new(enum stm_type_e stm_type, void *stm) {
+  struct stm_t *res = malloc(sizeof(struct stm_t));
+  res->stm_type = stm_type;
+  res->stm      = stm;
+  return res;
+}
+
+void stm_free(struct stm_t *this) {
+  if(!this) return;
+  switch(this->stm_type) {
+    case CON_STM:
+      con_stm_free(this->stm);
+      break;
+    case LOOP_STM:
+      loop_stm_free(this->stm);
+      break;
+    case STRUCT_STM:
+      struct_free(this->stm);
+      break;
+    case EXP_STM:
+      exp_free(this->stm);
+      break;
+    case VAR_STM:
+      var_stm_free(this->stm);
+      break;
+    case LST_STM:
+      stack_free(&this->stm, stm_free);
+      break;
+  }
+  free(this);
+}
+
+void stm_lst_emit(struct stack_t *this, FILE *out) {
+  emit_line(out, "{");
+  stack_for_each(&this->stms, {
+    stm_emit(obj, out);
+    emit_line(out, "");
+  });
+  emit_line(out, "}");
+}
+
+void stm_emit(struct stm_t *this, FILE *out) {
+  swtich(this->stm_type) {
+    case CON_STM: {
+      struct con_stm_t *con_stm = stack_pop(&this->stm);
+      emit(out, "if (");
+      if(!con_stm->con) panic("invalid else statement");
+      exp_emit(con_stm->con, out);
+      emit(out, ")");
+      stm_lst_emit(con_stm->stms, out);
+      free(con_stm);
+      while(this->stm) {
+        con_stm = stack_pop(&this->stm);
+        if(con_stm->con) {
+          emit(out, "else if (");
+          exp_emit(con_stm->con, out);
+          emit(out, ")");
+        } else {
+          emit(out, "else");
+        }
+        stm_lst_emit(con_stm->stms, out);
+        free(con_stm);
+      }
+      break;
+    }
+    case LOOP_STM: {
+      struct loop_stm_t *loop_stm = this->stm;
+      emit("while (");
+      exp_emit(loop_stm->con, out);
+      emit(") ");
+      stm_lst_emit(loop_stm->stms, out);
+      break;
+    }
+    case STRUCT_STM:
+      struct_emit(this->stm, out);
+      break;
+    case EXP_STM: 
+      exp_emit(this->stm, out);
+      emit_line(out, ";");
+      break;
+    case VAR_STM:
+      var_emit(((struct var_stm_t*)this->stm)->var, out);
+      emit(out, " = ");
+      exp_emit(((struct var_stm_t*)this->stm)->val, out);
+      emit_line(out, ";");
+      free(this->stm);
+    case LST_STM:
+      lst_stm_emit(this->stm, out);
+  }
+  free(this);
+}
+
+struct con_stm_t *con_stm_new(struct exp_t *con, struct stack_t *stms) {
+  struct con_stm_t *res = malloc(sizeof(struct con_stm_t));
+  res->con  = con;
+  res->stms = stms;
+  return res;
+}
+
+void con_stm_free(struct stack_t *this) {
+  if(!this) return;
+  exp_free(this->con);
+  stack_free(&this->stms, stm_free);
+  free(this);
+}
 
 // -- TYPE ------------------------------
 
@@ -629,39 +1019,6 @@ struct comp_exp_t {
   struct type_t  *type;
   struct stack_t *vals;
 };
-
-//---------------------------------------
-// PARSER 
-//---------------------------------------
-
-struct parser_t {
-  FILE *in;
-  FILE *out;
-  
-  struct lexer_t lexer;
-};
-
-int parse_struct(struct parser_t *this) {
-}
-
-int parse_var(struct parser_t *this) {
-}
-
-int parser_global(struct parser_t *this) {
-}
-
-void parse(FILE *in, FILE *out) {
-  struct parser_t parser;
-  parser.in  = in;
-  parser.out = out;
-  lexer_crt(&parser.lexer, in);
-  
-  struct token_t *token = 0;
-  for(;;) {
-    if(!(token = lexer_next(&parser.lexer))) break;
-    token_print(token);
-  }
-}
 
 //---------------------------------------
 // MAIN PROGRAMM 
