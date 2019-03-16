@@ -97,16 +97,16 @@ void stack_inverse(struct stack **this) {
   X(IF,       "if")       \
   X(WHILE,    "while")    \
   X(SIZEOF,   "sizeof")   \
-  X(i8),      "i8")       \
-  X(u8),      "u8")       \
-  X(i16),     "i16")      \
-  X(u16),     "u16")      \
-  X(i32),     "i32")      \
-  X(u32),     "u32")      \
-  X(i64),     "i64")      \
-  X(u64),     "u64")      \
-  X(f32),     "f32")      \
-  X(f64),     "f64")      \
+  X(I8),      "i8")       \
+  X(U8),      "u8")       \
+  X(I16),     "i16")      \
+  X(U16),     "u16")      \
+  X(I32),     "i32")      \
+  X(U32),     "u32")      \
+  X(I64),     "i64")      \
+  X(U64),     "u64")      \
+  X(F32),     "f32")      \
+  X(F64),     "f64")      \
   X(VOID,     "void") 
 
 #define OP_LIST          \
@@ -488,16 +488,29 @@ struct parser_t {
   struct lexer_t lexer;
 };
 
-// A parser function has the structure
-// type *parse_type(struct parser_t *parser, int *rcr) { int rc = 0; }
+// PARSER FUNCTION
+// parser: type *parse_type(struct parser_t *parser, int *rcr { 
+//           int rc = 0;
+//           ...
+//           *rcr += rc;
+//           return type_new(...);
+//         } 
+//
+// type:   type *type_new(args..);               -- returns new variable
+//         void type_free(type *this);           -- destructs type
+//         void type_emit(type *this, FILE* out) -- emits type and destructs it
+
+// cosumes and sets next token and return bool
 #define is_token(var, tok) \
   (rc++, (var = lexer_next(&parser->lexer))->token_type == tok)
 
+// rewinds all tokens since parser function started
 #define parser_fail() {             \
   lexer_rewind(&parser->lexer, rc); \
   return 0;                         \
 }
  
+// checks, consumes and sets next token. executes on fail on falure
 #define set_next_token(var, tok, on_fail) {                   \
   rc++;                                                       \
   if((var = lexer_next(&parser->lexer))->token_type != tok) { \
@@ -507,6 +520,7 @@ struct parser_t {
   }                                                           \
 }
 
+// consumes next token. executes on fail on failure
 #define next_token(tok, on_fail) {                    \
   rc++;                                               \
   if(lexer_next(&parser->lexer)->token_type != tok) { \
@@ -516,6 +530,7 @@ struct parser_t {
   }                                                   \
 }
 
+// checks next token without consuming it
 #define token_peek(tok) (lexer_peek(&parser->lexer)->token_type == tok)
 
 void parse(FILE *in, FILE *out) {
@@ -534,31 +549,252 @@ void parse(FILE *in, FILE *out) {
 //---------------------------------------
 // AST_TYPES
 //---------------------------------------
-
-struct struct_t;
+// TYPE_FORWARD_DECLARATION:
+//---------------------------------------
+// -- STRUCT ----------------------------
+struct struct_t
+// -- VARIABLE --------------------------
 struct var_t;
+// -- FUNCTION --------------------------
 struct function_t;
+// -- TYPE ------------------------------
+struct type_t;
+// -- STATEMENT -------------------------
 struct stm_t;
 struct con_stm_t;
 struct loop_stm_t;
 struct var_stm_t;
-struct type_t;
 struct arr_type_t;
 struct fun_type_t;
+// -- EXPRESSION ------------------------
+struct exp_t;
+struct bin_exp_t;
+struct ter_exp_t;
+struct cast_exp_t;
+struct comp_exp_t;
+//---------------------------------------
+// TYPE_DECLARATION: 
+//---------------------------------------
+// -- STRUCT ----------------------------
+struct struct_t {
+  struct token_t *id;
+  struct stack_t *vars; // <var_t>
+};
+// -- VARIABLE --------------------------
+struct var_t {
+  struct token_t *id;
+  struct type_t  *type;
+};
+// -- FUNCTION --------------------------
+struct function_t {
+  struct token_t *id;
+  struct type_t  *type;
+  struct stack_t *params; // <var_t>
+  struct stack_t *stms;   // <stm_t>
+};
+// -- TYPE ------------------------------
+#define PTYPE_LIST                       \
+  X(I8_T,   "int8_t")   /* empty      */ \
+  X(U8_T,   "uint8_t")  /* empty      */ \
+  X(I16_T,  "int16_t")  /* empty      */ \
+  X(U16_T,  "uint16_t") /* empty      */ \
+  X(I32_T,  "int32_t")  /* empty      */ \
+  X(U32_T,  "uint32_t") /* empty      */ \
+  X(I64_T,  "int64_t")  /* empty      */ \
+  X(U64_T,  "uint64_t") /* empty      */ \
+  X(F32_T,  "float")    /* empty      */ \
+  X(F64_T   "double")   /* empty      */ \
+  X(VOID_T, "void")     /* empty      */ 
+#define CTYPE_LIST                       \
+  X(ID_T,   "")         /* token_t    */ \
+  X(ARR_T,  "")         /* arr_type_t */ \
+  X(FUN_T,  "")         /* fun_type_t */ \
+
+enum type_type_e {
+#define X(tok, v) tok,
+PTYPE_LIST
+CTYPE_LIST
+#undef X
+};
+
+struct type_t {
+  enum type_type_e type_type;
+  void             *type;
+  size_t           ref_count;
+};
+
+struct arr_type_t {
+  struct type_t *type;
+  struct exp_t  *size;
+};
+
+struct fun_type_t {
+  struct type_t  *type;
+  struct stack_t *params; // <type_t>
+};
+// -- STATEMENT -------------------------
+#define STM_LIST                            \
+  X(CON_STM)     /* stack_t<guard_stm_t> */ \
+  X(LOOP_STM)    /* guard_stm_t          */ \
+  X(STRUCT_STM)  /* struct_t             */ \
+  X(EXP_STM)     /* exp_t                */ \
+  X(VAR_STM)     /* var_stm_t            */ \
+  X(LST_STM)     /* stack_t<stm_t>       */ 
+
+enum stm_type_e {
+#define X(tok) tok,
+STM_LIST
+#undef X
+};
+
+struct stm_t {
+  enum stm_type_e stm_type;
+  void            *stm;
+};
+
+struct guard_stm_t {
+  struct exp_t     *con; 
+  struct lst_stm_t *stms;
+};
+
+struct var_stm_t {
+  struct var_t *var;
+  struct exp_t *val;
+};
+// -- EXPRESSION ------------------------
+#define PEXP_LIST                                              \
+  X(COMP_EXP,    "")    /* (type) { exp, ... } | comp_exp_t */ \
+  X(INT_EXP,     "")    /* 10                  | token_t    */ \
+  X(FLOAT_EXP,   "")    /* 10.0                | token_t    */ \
+  X(STRING_EXP,  "")    /* "str"               | token_t    */ \
+  X(ID_EXP,      "")    /* x                   | token_t    */ \
+  X(SIZEOF_EXP,  "")    /* sizeof(type)        | type_t     */ \
+  X(BRACKET_EXP, "")    /* ( exp )             | exp_t      */ \
+  X(CAST_EXP,    "")    /* ( type ) exp        | cast_exp_t */ \
+  X(CALL_EXP,    "")    /* exp ( exp, ... )    | stack_t    */ \
+  X(ARR_EXP,     "")    /* exp [ exp ]         | bin_exp_t  */ \
+  X(TER_EXP,     "")    /* exp ? exp : exp     | ter_exp_t  */ 
+#define UEXP_LIST                                              \
+  X(INC_EXP,     "++")  /* ++ exp              | exp_t      */ \
+  X(DEC_EXP,     "--")  /* -- exp              | exp_t      */ \
+  X(POS_EXP,     "+")   /* + exp               | exp_t      */ \
+  X(MIN_EXP,     "-")   /* - exp               | exp_t      */ \
+  X(NOT_EXP,     "!")   /* ! exp               | exp_t      */ \
+  X(BIT_NOT_EXP, "~")   /* ~ exp               | exp_t      */ \
+  X(DEREF_EXP,   "*")   /* * exp               | exp_t      */ \
+  X(REF_EXP,     "&")   /* & exp               | exp_t      */ 
+#define BEXP_LIST                                              \
+  X(DOT_EX,      ".")   /* exp . exp           | bin_exp_t  */ \
+  X(ARROW_EXP,   "->")  /* exp -> exp          | bin_exp_t  */ \
+  X(MULT_EXP,    "*")   /* exp * exp           | bin_exp_t  */ \
+  X(DIV_EXP,     "/")   /* exp / exp           | bin_exp_t  */ \
+  X(MOD_EXP,     "%")   /* exp % exp           | bin_exp_t  */ \
+  X(ADD_EXP,     "+")   /* exp + exp           | bin_exp_t  */ \
+  X(SUB_EXP,     "-")   /* exp - exp           | bin_exp_t  */ \
+  X(LS_EXP,      "<<")  /* exp << exp          | bin_exp_t  */ \
+  X(RS_EXP,      ">>")  /* exp >> exp          | bin_exp_t  */ \
+  X(LT_EXP,      "<")   /* exp < exp           | bin_exp_t  */ \
+  X(GT_EXP,      ">")   /* exp > exp           | bin_exp_t  */ \
+  X(LE_EXP,      "<=")  /* exp <= exp          | bin_exp_t  */ \
+  X(GE_EXP,      ">=")  /* exp >= exp          | bin_exp_t  */ \
+  X(EQ_EXP,      "==")  /* exp == exp          | bin_exp_t  */ \
+  X(NE_EXP,      "!=")  /* exp != exp          | bin_exp_t  */ \
+  X(BIT_AND_EXP, "&")   /* exp & exp           | bin_exp_t  */ \
+  X(BIT_XOR_EXP, "^")   /* exp ^ exp           | bin_exp_t  */ \
+  X(BIT_OR_EXP,  "|")   /* exp | exp           | bin_exp_t  */ \
+  X(AND_EXP,     "&&")  /* exp && exp          | bin_exp_t  */ \
+  X(OR_EXP,      "||")  /* exp || exp          | bin_exp_t  */ \
+  X(ASG_EXP,     "=")   /* exp = exp           | bin_exp_t  */ \
+  X(ADDA_EXP,    "+=")  /* exp += exp          | bin_exp_t  */ \
+  X(SUBA_EXP,    "-=")  /* exp -= exp          | bin_exp_t  */ \
+  X(MULTA_EXP,   "*=")  /* exp *= exp          | bin_exp_t  */ \
+  X(DIVA_EXP,    "/=")  /* exp /= exp          | bin_exp_t  */ \
+  X(MODA_EXP,    "%=")  /* exp %= exp          | bin_exp_t  */ \
+  X(LSA_EXP,     "<<=") /* exp <<= exp         | bin_exp_t  */ \
+  X(RSA_EXP,     ">>=") /* exp >>= exp         | bin_exp_t  */ \
+  X(ANDA_EXP,    "&=")  /* exp &= exp          | bin_exp_t  */ \
+  X(XORA_EXP,    "^=")  /* exp ^= exp          | bin_exp_t  */ \
+  X(ORA_EXP,     "|=")  /* exp |= exp          | bin_exp_t  */ \
+  X(COMMA_EXP,   ",")   /* exp , exp           | bin_exp_t  */ 
+  
+enum exp_type_e {
+#define X(tok, v) tok,
+PEXP_LIST
+UEXP_LIST
+BEXP_LIST
+#undef X
+};
+
+struct exp_t {
+  enum exp_type_e exp_type;
+  void            *exp;
+};
+
+struct bin_exp_t {
+  struct exp_t *f;
+  struct exp_t *s;
+};
+
+struct ter_exp_t {
+  struct exp_t *f;
+  struct exp_t *s;
+  struct exp_t *t;
+};
+
+struct cast_exp_t {
+  struct type_t *type;
+  struct exp_t  *exp;
+};
+
+struct comp_exp_t {
+  struct type_t  *type;
+  struct stack_t *vals;
+};
+//---------------------------------------
+// FUNCTION_DECLARATION: 
+//---------------------------------------
+// -- -- STRUCT -------------------------
+struct struct_t*   struct_new(struct token_t*, struct stack_t*);
+void               struct_free(struct struct_t*);
+void               struct_emit(struct struct_t*, FILE*);
+struct sturct_t*   parse_struct(struct parser_t*, int*);
+// -- -- VARIABLE -----------------------
+struct var_t*      var_new(struct token_t*, struct type_t*);
+void               var_free(struct var_t*);
+void               var_emit(struct var_t*, FILE*);
+struct var_t*      parse_var(struct parser_t*, int*);
+// -- -- FUNCTION -----------------------
+struct function_t* function_new(struct token_t*, struct type_t*, struct stack_t*, struct stack_t*);
+void               function_free(struct function_t*);
+void               function_emit(struct function_t*, FILE*);
+struct function_t* parse_function(struct parser_t*, int*);
+// -- -- TYPE ---------------------------
+struct type_t*     type_new(enum type_type_e, void*, size_t);
+void               type_free(struct type_t*);
+void               type_emit(struct type_t*);
+void               type_emit_head(struct type_t*, FILE*);
+void               type_emit_tail(struct type_t*, FILE*);
+struct type_t*     parse_type(struct parser_t*, int*);
+// -- -- STATEMENT ----------------------
+struct stm_t;
+struct con_stm_t;
+struct loop_stm_t;
+struct var_stm_t;
+struct arr_type_t;
+struct fun_type_t;
+// -- -- EXPRESSION ---------------------
 struct exp_t;
 struct bin_exp_t;
 struct ter_exp_t;
 struct cast_exp_t;
 struct comp_exp_t;
 
+// --  ----------------------------------
+
+
 // -- STRUCT ----------------------------
 
-struct struct_t {
-  struct token_t *id;
-  struct stack_t *vars; // <var_t>
-};
-
-struct struct_new(struct token_t *id, struct stack_t *vars) {
+struct struct_t *struct_new(struct token_t *id, struct stack_t *vars) {
   struct struct_t *res = malloc(sizeof(struct struct_t));
   res->id   = id;
   res->vars = vars;
@@ -611,11 +847,6 @@ struct struct_t *parse_struct(struct parser_t *parser, int *rcr) {
 
 // -- VARIABLE --------------------------
 
-struct var_t {
-  struct token_t *id;
-  struct type_t  *type;
-};
-
 struct var_new(struct token_t *id, struct type_t *type) {
   struct var_t *res = malloc(sizeof(struct var_t));
   res->id   = id;
@@ -654,13 +885,6 @@ struct var_t *parse_var(struct parser_t *parser, int *rcr) {
 }
 
 // -- FUNCTION --------------------------
-
-struct function_t {
-  struct token_t *id;
-  struct type_t  *type;
-  struct stack_t *params; // <var_t>
-  struct stack_t *stms;   // <stm_t>
-};
 
 struct function_t *function_new(struct token_t *id, struct type_t *type, struct stack_t *params, struct stack_t *stms) {
   struct function_t *res = malloc(sizeof(struct function_t));
@@ -751,41 +975,184 @@ struct function_t *parse_function(struct parser_t *parser, int *rcr) {
   return function_new(token_copy(id), type, params, stms);
 }
 
-// -- STATEMENT -------------------------
+// -- TYPE ------------------------------
 
-#define STM_LIST                          \
-  X(CON_STM)     /* stack_t<con_stm_t> */ \
-  X(LOOP_STM)    /* loop_stm_t         */ \
-  X(STRUCT_STM)  /* struct_t           */ \
-  X(EXP_STM)     /* exp_t              */ \
-  X(VAR_STM)     /* var_stm_t          */ \
-  X(LST_STM)     /* stack_t<stm_t>     */ 
+struct type_t *type_new(enum type_type_e type_type, void* type, size_t ref_count) {
+  struct type_t *res = malloc(sizeof(struct type_t));
+  res->type_type = type_type;
+  res->type      = type;
+  res->ref_count = ref_count;
+  return res;
+}
 
-enum stm_type_e {
-#define X(tok) tok,
-STM_LIST
+void type_free(struct type_t *this) {
+  if(!this) return;
+  switch(this->type_type) {
+    case ID_T: token_free(this->type); break;
+    case ARR_T: {
+      struct arr_type_t *arr_type = this->type;
+      type_free(arr_type->type);
+      exp_free(arr_type->size);
+      free(arr_type);
+      break;
+    }
+    case FUN_T: {
+      struct fun_type_t *fun_type = this->type;
+      type_free(fun_type->type);
+      stack_free(&fun_type->params, var_free);
+      free(fun_type);
+      break;
+    }
+    default: break;
+  }
+  free(this);
+}
+
+void type_emit(struct type_t *this, FILE* out) {
+  type_emit_head(this, out);
+  type_emit_tail(this, out);
+}
+
+void type_emit_head(struct type_t *this, FILE *out) {
+  switch(this->type_type) {
+#define X(tok, v) case tok: emit(out, v); break;
+PTYPE_LIST
 #undef X
-};
+    case ID_T: 
+      emit(out, "%s ", ((struct token_t*)this->type)->str_val, out); 
+      token_free(this->type);
+      break;
+    case ARR_T:
+      type_emit_head(((struct arr_type_t*)this->type)->type, out);
+      break;
+    case FUN_T: {
+      struct fun_type_t *fun_type = this->type;
+      type_emit(fun_type->type, out);
+      emit(out, "(*");
+    }
+  }
+}
 
-struct stm_t {
-  enum stm_type_e stm_type;
-  void            *stm;
-};
+void type_emit_tail(struct type_t* this, FILE *out) {
+  switch(this->type_type) {
+    case ARR_T: {
+      struct arr_type_t *arr_type = this->type
+      type_emit_tail(arr_type->type, out);
+      emit(out, "[");
+      exp_emit(arr_type->size, out);
+      emit(out, "] ");
+    }
+    case FUN_T: {
+      struct fun_type_t *fun_type = this->type;
+      emit(out, ")(");
+      stack_for_each(&fun_type->params, {
+        type_emit(obj, out);
+        if(fun_type->next) emit(out, ", ");
+      });
+      emit(out, ")");
+    }
+    default: break;
+  }
+  for(;this->ref_count;this->ref_count--) {
+    emit(out, "*");
+  }
+  free(this);
+}
 
-struct con_stm_t {
-  struct exp_t   *con;  // else has con = 0
-  struct stack_t *stms; // <stm_t>
-};
+struct type_t *parse_type(struct parser_t *parser, int *rcr) {
+  int rc = 0;
+  int token_t *token = lexer_next(&parser->lexer);
+  enum type_type_e type_type;
+  void *type = 0;
+  size_t ref_count = 0;
 
-struct loop_stm_t {
-  struct exp_t   *con;
-  struct stack_t *stms; // <stm_t>
-};
+#define AT_F  free(arr_type);
+#define TAT_F type_free(arr_type->type);
+#define AE_F  exp_free(arr_type->size);
+#define FS_F  stack_free(&function_type->params, type_free);
+#define FT_F  free(function_type);
+#define FTT_F type_free(function_type->type);
 
-struct var_stm_t {
-  struct var_t *var;
-  struct exp_t *val;
-};
+  rc++;
+  switch(token->token_type) {
+    case I8:   type_type = I8_T; break;
+    case U8:   type_type = U8_T; break;
+    case I16:  type_type = I16_T; break;
+    case U16:  type_type = U16_T; break;
+    case I32:  type_type = I32_T; break;
+    case U32:  type_type = U32_T; break;
+    case I64:  type_type = I64_T; break;
+    case U64:  type_type = U64_T; break;
+    case F32:  type_type = F32_T; break;
+    case f64:  type_type = F64_T; break;
+    case VOID: type_type = VOID_T; break;
+    case ID: 
+      type_type = ID_T;
+      type = token_copy(token);
+      break;
+    case L_S_B: { // ARRAY_TYPE
+      struct arr_type_t *arr_type = malloc(sizeof(struct arr_type_t));
+      if(!(arr_type->type = parse_type(parser, &rc))) {
+        AT_F
+        parser_fail();
+      }
+      next_token(SEMICOLON, { type_free(arr_type->type); free(arr_type); });
+      if(!(arr_type->size = parse_type(parser, &rc))) {
+        TAT_F
+        AT_F
+        parser_fail();
+      }
+      next_token(R_S_B, { TAT_F AE_F AT_F });
+      type = arr_type;
+      break;
+    }
+    case L_R_B: { // FUNCTION_TYPE
+      struct function_type_t *function_type = malloc(sizeof(struct function_type_t));
+      struct type_t *fptype = 0;
+      while(!token_peek(R_R_B)) {
+        if(!(fptype = parse_type(parser, &rc))) {
+          FS_F FT_F
+          parser_fail();
+        }
+        stack_push(&function_type->params, fptype);
+        if(token_peek(R_R_B)) break;
+      }
+      next_token(R_R_B, { FS_F FT_F });
+      if(token_peek(ARROW)) {
+        token_next(ARROW; { panic("bug next token should be ->"); });
+        if(!(fptype = parse_type(parser, &rc))) {
+          FS_F FT_F
+          parser_fail();
+        }
+        function_type->type = fptype;
+      } else {
+        function_type->type = type_new(VOID_T, 0, 0);
+      }
+
+      type = function_type;
+      break;
+    }
+    default:
+      parser_fail();
+  }
+  
+  struct token_t *temp = 0;
+  for(;is_token(temp, ASTERIX); ref_count++);
+  lexer_rewind(&parser->lexer, 1);
+  rc--;
+
+#undef AT_F
+#undef TAT_F
+#undef AE_F
+#undef FS_F
+#undef FT_F
+#undef FTT_F
+  
+  *rcr += rc;
+  return type_new(type_type, type, ref_count);
+}
+
+// -- STATEMENT -------------------------
 
 struct stm_t *stack_new(enum stm_type_e stm_type, void *stm) {
   struct stm_t *res = malloc(sizeof(struct stm_t));
@@ -893,132 +1260,8 @@ void con_stm_free(struct stack_t *this) {
   free(this);
 }
 
-// -- TYPE ------------------------------
-
-#define TYPE_LIST            \
-  X(I8_T)   /* empty      */ \
-  X(U8_T)   /* empty      */ \
-  X(I16_T)  /* empty      */ \
-  X(U16_T)  /* empty      */ \
-  X(I32_T)  /* empty      */ \
-  X(U32_T)  /* empty      */ \
-  X(I64_T)  /* empty      */ \
-  X(U64_T)  /* empty      */ \
-  X(F32_T)  /* empty      */ \
-  X(F64_T)  /* empty      */ \
-  X(VOID_T) /* empty      */ \
-  X(ID_T)   /* token_t    */ \
-  X(ARR_T)  /* arr_type_t */ \
-  X(FUN_T)  /* fun_type_t */ \
-  X(REF_T)  /* type_t     */
-
-enum type_type_e {
-#define X(tok) tok,
-TYPE_LIST
-#undef X
-};
-
-struct type_t {
-  enum type_type_e type_type;
-  void             *type;
-};
-
-struct arr_type_t {
-  struct type_t *type;
-  struct exp_t  *size;
-};
-
-struct fun_type_t {
-  struct type_t  *type;
-  struct stack_t *params;
-};
 
 // -- EXPRESSION ------------------------
-
-#define EXP_LIST                                           \
-  X(COMP_EXP)    /* (type) { exp, ... } | comp_exp_t */ \
-  X(INT_EXP)     /* 10                  | token_t    */ \
-  X(FLOAT_EXP)   /* 10.0                | token_t    */ \
-  X(STRING_EXP)  /* "str"               | token_t    */ \
-  X(ID_EXP)      /* x                   | token_t    */ \
-  X(SIZEOF_EXP)  /* sizeof(type)        | type_t     */ \
-  X(BRACKET_EXP) /* ( exp )             | exp_t      */ \
-  X(INC_EXP)     /* ++ exp              | exp_t      */ \
-  X(DEC_EXP)     /* -- exp              | exp_t      */ \
-  X(POS_EXP)     /* + exp               | exp_t      */ \
-  X(MIN_EXP)     /* - exp               | exp_t      */ \
-  X(NOT_EXP)     /* ! exp               | exp_t      */ \
-  X(BIT_NOT_EXP) /* ~ exp               | exp_t      */ \
-  X(CAST_EXP)    /* ( type ) exp        | cast_exp_t */ \
-  X(DEREF_EXP)   /* * exp               | exp_t      */ \
-  X(REF_EXP)     /* & exp               | exp_t      */ \
-  X(DOT_EXP)     /* exp . exp           | bin_exp_t  */ \
-  X(ARROW_EXP)   /* exp -> exp          | bin_exp_t  */ \
-  X(ARR_EXP)     /* exp [ exp ]         | bin_exp_t  */ \
-  X(CALL_EXP)    /* exp ( exp, ... )    | stack_t    */ \
-  X(MULT_EXP)    /* exp * exp           | bin_exp_t  */ \
-  X(DIV_EXP)     /* exp / exp           | bin_exp_t  */ \
-  X(MOD_EXP)     /* exp % exp           | bin_exp_t  */ \
-  X(ADD_EXP)     /* exp + exp           | bin_exp_t  */ \
-  X(SUB_EXP)     /* exp - exp           | bin_exp_t  */ \
-  X(LS_EXP)      /* exp << exp          | bin_exp_t  */ \
-  X(RS_EXP)      /* exp >> exp          | bin_exp_t  */ \
-  X(LT_EXP)      /* exp < exp           | bin_exp_t  */ \
-  X(GT_EXP)      /* exp > exp           | bin_exp_t  */ \
-  X(LE_EXP)      /* exp <= exp          | bin_exp_t  */ \
-  X(GE_EXP)      /* exp >= exp          | bin_exp_t  */ \
-  X(EQ_EXP)      /* exp == exp          | bin_exp_t  */ \
-  X(NE_EXP)      /* exp != exp          | bin_exp_t  */ \
-  X(BIT_AND_EXP) /* exp & exp           | bin_exp_t  */ \
-  X(BIT_XOR_EXP) /* exp ^ exp           | bin_exp_t  */ \
-  X(BIT_OR_EXP)  /* exp | exp           | bin_exp_t  */ \
-  X(AND_EXP)     /* exp && exp          | bin_exp_t  */ \
-  X(OR_EXP)      /* exp || exp          | bin_exp_t  */ \
-  X(TER_EXP)     /* exp ? exp : exp     | ter_exp_t  */ \
-  X(ASG_EXP)     /* exp = exp           | bin_exp_t  */ \
-  X(ADDA_EXP)    /* exp += exp          | bin_exp_t  */ \
-  X(SUBA_EXP)    /* exp += exp          | bin_exp_t  */ \
-  X(MULTA_EXP)   /* exp *= exp          | bin_exp_t  */ \
-  X(DIVA_EXP)    /* exp /= exp          | bin_exp_t  */ \
-  X(MODA_EXP)    /* exp %= exp          | bin_exp_t  */ \
-  X(LSA_EXP)     /* exp <<= exp         | bin_exp_t  */ \
-  X(RSA_EXP)     /* exp >>= exp         | bin_exp_t  */ \
-  X(ANDA_EXP)    /* exp &= exp          | bin_exp_t  */ \
-  X(XORA_EXP)    /* exp ^= exp          | bin_exp_t  */ \
-  X(ORA_EXP)     /* exp |= exp          | bin_exp_t  */ \
-  X(COMMA_EXP)   /* exp , exp           | bin_exp_t  */ 
-  
-enum exp_type_e {
-#define X(tok) tok,
-EXP_LIST
-#undef X
-};
-
-struct exp_t {
-  enum exp_type_e exp_type;
-  void            *exp;
-};
-
-struct bin_exp_t {
-  struct exp_t *f;
-  struct exp_t *s;
-};
-
-struct ter_exp_t {
-  struct exp_t *f;
-  struct exp_t *s;
-  struct exp_t *t;
-};
-
-struct cast_exp_t {
-  struct type_t *type;
-  struct exp_t  *exp;
-};
-
-struct comp_exp_t {
-  struct type_t  *type;
-  struct stack_t *vals;
-};
 
 //---------------------------------------
 // MAIN PROGRAMM 
