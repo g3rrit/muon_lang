@@ -22,21 +22,20 @@ struct' : var ; struct'
 //---------------------------------------
 
 stm : con_stm
-    | while exp stm_lst
+    | while exp stm
+    | stm_lst
     | exp ;
     | struct ;
     | var ;
     | var = exp ;
-    | stm_lst
     | ;
     ;
     
-con_stm : if exp stm_lst con_stm'
+con_stm : if exp stm con_stm'
         ;
 
-con_stm' : elif exp stm_lst con_stm'
-         | elif exp con_stm'
-         | else stm_lst
+con_stm' : elif exp stm con_stm'
+         | else stm
          | /* empty */
          ;
  
@@ -92,10 +91,10 @@ function_type' : type , function_type'
 // FUNCTION
 //---------------------------------------
 
-function : id ( ) stm_block
-         | id ( ) -> type stm_block
-         | id ( function' ) stm_block
-         | id ( function' ) -> type stm_block
+function : id ( ) stm
+         | id ( ) -> type stm
+         | id ( function' ) stm
+         | id ( function' ) -> type stm
          ;
 
 function' : var , function'
@@ -105,38 +104,28 @@ function' : var , function'
 // EXPRESSION 
 //---------------------------------------
 
-compound_l : ( type ) { compound_l' }
-           ;
-           
-compount_l' : . id = exp , compound_l'
-            | exp , compound_l'
-            | . id = exp
-            | exp 
-            ;
-
 p_exp : int_l
       | float_l
       | string_l
       | id
-      | compound_l
       | sizeof ( type )
+      | ( exp )
+      | ++ exp
+      | -- exp
+      | + exp
+      | - exp
+      | ! exp
+      | ~ exp
+      | < type > exp
+      | * exp
+      | & exp
       ;
       
 exp : p_exp exp'
-    | ( exp )
-    | ++ exp
-    | -- exp
-    | + exp
-    | - exp
-    | ! exp
-    | ~ exp
-    | ( type ) exp
-    | * exp
-    | & exp
     ;
 
-exp' : . id exp'
-     | -> id exp'
+exp' : . exp exp'
+     | -> exp exp'
      | [ exp ] exp'
      | ( arg_lst ) exp'
      | * exp exp'
