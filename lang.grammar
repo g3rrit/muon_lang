@@ -109,7 +109,6 @@ p_exp : int_l
       | string_l
       | id
       | sizeof ( type )
-      | ( exp )
       | ++ exp
       | -- exp
       | + exp
@@ -119,49 +118,44 @@ p_exp : int_l
       | < type > exp
       | * exp
       | & exp
+      | ( exp )
       ;
       
-exp : p_exp exp'
+exp : p_exp . p_exp
+    | p_exp -> p_exp 
+    | p_exp [ p_exp ] 
+    | p_exp ( arg_lst )
+    | p_exp mult p_exp 
+    | p_exp div p_exp 
+    | p_exp mod p_exp 
+    | p_exp add p_exp 
+    | p_exp sub p_exp 
+    | p_exp ls p_exp 
+    | p_exp rs p_exp 
+    | p_exp lt p_exp 
+    | p_exp gt p_exp 
+    | p_exp <= p_exp 
+    | p_exp >= p_exp 
+    | p_exp == p_exp 
+    | p_exp != p_exp 
+    | p_exp band p_exp 
+    | p_exp bxor p_exp 
+    | p_exp bor p_exp 
+    | p_exp and p_exp 
+    | p_exp or p_exp 
+    | p_exp = p_exp 
+    | p_exp += p_exp 
+    | p_exp -= p_exp 
+    | p_exp *= p_exp 
+    | p_exp /= p_exp 
+    | p_exp %= p_exp 
+    | p_exp <<= p_exp 
+    | p_exp >>= p_exp 
+    | p_exp &= p_exp 
+    | p_exp ^= p_exp 
+    | p_exp |= p_exp 
     ;
-
-exp' : . exp exp'
-     | -> exp exp'
-     | [ exp ] exp'
-     | ( arg_lst ) exp'
-     | * exp exp'
-     | / exp exp'
-     | % exp exp'
-     | + exp exp'
-     | - exp exp'
-     | << exp exp'
-     | >> exp exp'
-     | < exp exp'
-     | > exp exp'
-     | <= exp exp'
-     | >= exp exp'
-     | == exp exp'
-     | != exp exp'
-     | & exp exp'
-     | ^ exp exp'
-     | | exp exp'
-     | && exp exp'
-     | || exp exp'
-     | ? exp : exp exp'
-     | = exp exp'
-     | += exp exp'
-     | -= exp exp'
-     | *= exp exp'
-     | /= exp exp'
-     | %= exp exp'
-     | <<= exp exp'
-     | >>= exp exp'
-     | &= exp exp'
-     | ^= exp exp'
-     | |= exp exp'
-     | , exp exp' 
-     | /* empty */ 
-     ;
      
 arg_lst : exp , arg_lst
-        | exp
+        | exp 
         ;
