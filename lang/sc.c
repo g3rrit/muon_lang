@@ -212,7 +212,7 @@ int is_str(char _c) {
 }
 
 //---------------------------------------
-// AST_TYPES 
+// NODE_TYPE
 //---------------------------------------
 
 typedef struct node_t {
@@ -235,6 +235,12 @@ void node_free(node_t *this) {
   free(this);
 }
 
+//---------------------------------------
+// PRIMATIVE_NODE_TYPES
+//---------------------------------------
+
+// -- STRING ----------------------------
+
 typedef void (*free_f)(void*);
 
 typedef struct str_t {
@@ -254,6 +260,8 @@ void str_free(str_t *this) {
   free(this);
 }
 
+// -- INTEGER ---------------------------
+
 typedef struct int_t {
   int val;
 } int_t;
@@ -269,6 +277,8 @@ void int_free(int_t *this) {
   free(this);
 }
 
+// -- FLOAT -----------------------------
+
 typedef struct float_t {
   double val;
 } float_t;
@@ -283,6 +293,8 @@ void float_free(float_t *this) {
   if(!this) return;
   free(this);
 }
+
+// -- CHAR ------------------------------
 
 typedef struct char_t {
   char val;
@@ -301,7 +313,7 @@ void char_free(char_t *this) {
 
 
 //---------------------------------------
-// PARSER_COMBINATOR
+// COMBINATOR_STRUCTURE
 //---------------------------------------
 
 typedef enum comb_e {
@@ -403,6 +415,8 @@ void parser_free(parser_t *this) {
   return (node_t*)0;  \
 }
 
+// -- ID_PARSER -------------------------
+
 node_t *parse_id(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
@@ -421,6 +435,8 @@ node_t *parse_id(void *env, input_t *input, ulong *rcr) {
   return node_new(ID_NODE, str_new(buffer), (free_f)str_free);
 }
 
+// -- INTEGER_PARSER --------------------
+
 node_t *parse_int(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
@@ -438,6 +454,8 @@ node_t *parse_int(void *env, input_t *input, ulong *rcr) {
   *rcr += rc;
   return node_new(INT_NODE, int_new(strtol(buffer, 0, 10)), (free_f)int_free);
 }
+
+// -- FLOAT_PARSER ----------------------
 
 node_t *parse_float(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
@@ -464,14 +482,70 @@ node_t *parse_float(void *env, input_t *input, ulong *rcr) {
   input_fail();
 }
 
+// -- CHAR_PARSER -----------------------
+
+node_t *parse_char(void *env, input_t *input, ulong *rcr) {
+  ulong rc = 0;
+
+  rc += input_skip(input, IGNORE_SET);
+  
+  char c = 0;
+  if(input_move() != '\'') input_fail();
+  if((c = input_move()) == '\\') {
+    switch((c = input_move())) {
+      case 'n': c = '\n'; break;
+      case 't': c = '\t'; break;
+      case 'r': c = '\r'; break;
+      case '\'': c = '\''; break;
+      case '\\': c = '\\'; break;
+      default: panic("invalid escape char %c", c);
+    }
+  }
+  if(!c) panic("end of file not expected");
+  
+  if(input_move() != '\'') panic("\"'\" expected");
+
+  *rcr += rc;
+  return node_new(CHAR_NODE, char_new(c), (free_f)char_free);
+}
+
+// -- STRING_PARSER ---------------------
+
+node_t *parse_str(void *env, input_t *input, ulong *rcr) {
+  ulong rc = 0;
+  char buffer[MAX_STR_LEN] = { 0 };
+  
+  rc += input_skip(input, IGNORE_SET);
+
+  if(input_move() != '"') input_fail();
+  size_t i = 0;
+  for(; (buffer[i] = input_move()); i++) {
+    if(buffer[i] == '"') {
+      if(i && buffer[i-1] == '\\') continue;
+      else break;
+    }
+    if(!is_str(buffer[i])) panic("invalid char inside string: %c", buffer[i]);
+  }
+  buffer[i] = 0;
+
+  *rcr += rc;
+  return node_new(STR_NODE, str_new(buffer), (free_f)str_free);
+}
+
+// --  ----------------------------------
+
 typedef struct closure_env_t {
   char *ref;
   node_type type;
   int is_op;
 } closure_env_t;
 
+// -- CUSTOM_PARSER ---------------------
+
 node_t *parse_op(closure_env_t *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
+
+  rc += input_skip(input, IGNORE_SET);
 
   for(size_t i = 0; env->ref[i]; i++) {
     if(input_move() != env->ref[i]) input_fail();
@@ -482,6 +556,7 @@ node_t *parse_op(closure_env_t *env, input_t *input, ulong *rcr) {
   return node_new(env->type, 0, (free_f)nop_free);
 }
 
+// -- MAIN_PARSER  ----------------------
 
 node_t *parse(parser_t *parser) {
   ulong rc = 0;
@@ -491,6 +566,8 @@ node_t *parse(parser_t *parser) {
 //---------------------------------------
 // COMBINATOR_FUNCTIONS 
 //---------------------------------------
+
+// -- PRIMITIVE_COMBINATORS -------------
 
 comb_t *match_id() {
   comb_t *res = comb_new(COMB_JUST); 
@@ -510,16 +587,38 @@ comb_t *match_float() {
   return res;
 }
 
-comb_t *match_op(char *op, node_type type) {
+comb_t *match_char() {
+  comb_t *res = comb_new(COMB_JUST);
+  res->parse = parse_char;
+  return res;
+}
+ 
+comb_t *match_str() {
+  comb_t *res = comb_new(COMB_JUST);
+  res->parse = parse_str;
+  return res;
+}
+
+comb_t *match_custom(char *str, node_type type, int is_op) {
   comb_t *res = comb_new(COMB_JUST);
   closure_env_t *env = alloc(sizeof(closure_env_t));
-  env->ref = op;
+  env->ref = str;
   env->type = type;
-  env->is_op = 1;
+  env->is_op = is_op;
   res->env = env;
   res->parse = (parse_f)parse_op;
   return res;
 }
+
+comb_t *match_op(char *op, node_type type) {
+  return match_custom(op, type, 1);
+}
+
+comb_t *match_key(char *key, node_type type) {
+  return match_custom(key, type, 0);
+}
+
+// -- JOINED_COMBINATORS ----------------
 
 comb_t *match_or(stack_t *stack) {
   comb_t *res = comb_new(COMB_OR);
@@ -564,6 +663,9 @@ typedef struct foo_t {
   node_t *id;
   node_t *int_val;
   node_t *float_val;
+  node_t *char_val1;
+  node_t *char_val2;
+  node_t *strv;
 } foo_t;
 
 void foo_free(foo_t *this) {}
@@ -575,7 +677,10 @@ node_t *test_fold(stack_t *stack) {
   res->int_val   = stack_pop(&stack);
   stack_pop(&stack);
   res->float_val = stack_pop(&stack);
+  res->char_val1 = stack_pop(&stack);
+  res->char_val2 = stack_pop(&stack);
   stack_pop(&stack);
+  res->strv = stack_pop(&stack);
   
   return node_new(STR_NODE, res, (free_f)foo_free);
 }
@@ -585,10 +690,16 @@ void foo_print(node_t *this) {
   str_t *str = foo->id->node;
   int_t *intval = foo->int_val->node;
   float_t *floatval = foo->float_val->node;
+  char_t *char1 = foo->char_val1->node;
+  char_t *char2 = foo->char_val2->node;
+  str_t *strv = foo->strv->node;
   printf("foo:\n");
   printf("id: %s\n", str->val);
   printf("int_val: %d\n", intval->val);
   printf("float_val: %lf\n", floatval->val);
+  printf("char1: %c\n", char1->val);
+  printf("char2: %c\n", char2->val);
+  printf("string: %s\n", strv->val);
 }
 
 int main(int argc, char **argv) {
@@ -596,7 +707,7 @@ int main(int argc, char **argv) {
   FILE *file = fopen(argv[1], "r");
   if(!file) panic("unable to open input file");
   
-  comb_t *base = match_and(stack_from(match_id(), match_int(), match_op("(", 1), match_float(), match_op(")", 2),0), test_fold);
+  comb_t *base = match_and(stack_from(match_id(), match_int(), match_op("(", 1), match_float(), match_char(), match_char(), match_op(")", 2), match_str(),0),  test_fold);
   
   parser_t *parser = parser_new(input_new(file), base);
   
