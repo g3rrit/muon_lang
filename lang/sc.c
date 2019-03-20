@@ -15,17 +15,14 @@
 //typedef size_t uint;
 typedef long unsigned int ulong;
 
-#define AST_TYPE_LIST \
-  X(AST_STR)          \
-  X(AST_ID)           \
-  X(AST_FLOAT)        \
-  X(AST_INT)          
+#define ID_NODE    -1
+#define INT_NODE   -2
+#define FLOAT_NODE -3
+#define STR_NODE   -4
+#define CHAR_NODE  -5
+#define STACK_NODE -6
 
-typedef enum ast_type_e {
-#define X(tok) tok,
-AST_TYPE_LIST
-#undef X
-} ast_type_e;
+typedef int node_type;
 
 //---------------------------------------
 // UTIL 
@@ -55,6 +52,8 @@ void *alloc(size_t size) {
   if(!res) panic("unable to allocate %lu bytes", size);
   return res;
 }
+
+void nop_free(void *obj) {}
 
 //---------------------------------------
 // STACK 
@@ -100,14 +99,17 @@ void *stack_next(stack_t **this) {
 }
 
 void stack_inverse(stack_t **this) {
-  stack_t *prev = *this;
-  stack_t *curr = (*this)->next;
-  prev->next = 0;
-  for(; curr; curr = curr->next) {
+  if(!*this) return;
+  stack_t *prev = 0;
+  stack_t *curr = *this;
+  stack_t *next = (*this)->next;
+  for(; next; next = next->next) {
     curr->next = prev;
     prev = curr;
+    curr = next;
   }
-  *this = prev;
+  curr->next = prev;
+  *this = curr;
 }
 
 stack_t *stack_from(void *obj, ...) {
@@ -213,21 +215,21 @@ int is_str(char _c) {
 // AST_TYPES 
 //---------------------------------------
 
-typedef struct ast_type_t {
-  ast_type_e type;
-  void       *node;
+typedef struct node_t {
+  node_type type;
+  void      *node;
   void (*free)(void*);
-} ast_type_t;
+} node_t;
 
-ast_type_t *ast_type_new(ast_type_e type, void *node, void(*free)(void*)) {
-  ast_type_t *res = alloc(sizeof(ast_type_t));
+node_t *node_new(node_type type, void *node, void(*free)(void*)) {
+  node_t *res = alloc(sizeof(node_t));
   res->type = type;
   res->node = node;
   res->free = free;
   return res;
 }
 
-void ast_type_free(ast_type_t *this) {
+void node_free(node_t *this) {
   if(!this) return;
   this->free(this->node);
   free(this);
@@ -235,15 +237,20 @@ void ast_type_free(ast_type_t *this) {
 
 typedef void (*free_f)(void*);
 
-typedef char* str_t;
+typedef struct str_t {
+  char *val;
+} str_t;
 
-str_t str_new(char *str) {
-  str_t res = alloc(strlen(str));
-  strcpy(res, str);
+str_t *str_new(char *str) {
+  str_t *res = alloc(sizeof(str_t));
+  res->val = alloc(strlen(str));
+  strcpy(res->val, str);
   return res;
 }
 
 void str_free(str_t *this) {
+  if(!this) return;
+  free(this->val);
   free(this);
 }
 
@@ -303,7 +310,7 @@ typedef enum comb_e {
  COMB_AND
 } comb_e;
 
-typedef ast_type_t*(*parse_f)(input_t*, ulong*);
+typedef node_t*(*parse_f)(void*, input_t*, ulong*);
 
 typedef struct comb_t {
   comb_e type;
@@ -311,33 +318,37 @@ typedef struct comb_t {
     parse_f parse;
     stack_t *stack;
   };
-  ast_type_t *(*combine)(stack_t*); //only important for and parser
+  node_t *(*fold)(stack_t*); //only important for and parser
+  void *env;
 } comb_t;
 
 comb_t *comb_new(comb_e type) {
   comb_t *res = alloc(sizeof(comb_t));
-  res->type    = type;
-  res->stack   = 0;
-  res->combine = 0;
+  res->type  = type;
+  res->stack = 0;
+  res->fold  = 0;
+  res->env   = 0;
   return res;
 }
 
 void comb_free(comb_t *this) {
   if(!this) return;
+  if(this->type != COMB_JUST) stack_free(&this->stack, comb_free);
+  free(this->env);
   free(this);
 }
 
-ast_type_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
-  ast_type_t *res = 0;
+node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
+  node_t *res = 0;
   stack_t    *stack = 0;
   stack_t    *in_stack = this->stack;
   comb_t     *comb_elem = 0;
   ulong      rc = 0;
   if(this->type == COMB_JUST) {
-    res = this->parse(input, &rc);
+    res = this->parse(this->env, input, &rc);
   } else if(this->type == COMB_OR) {
     while((comb_elem = stack_next(&in_stack))) {
-      if((res = comb_elem->parse(input, &rc))) {
+      if((res = comb_elem->parse(comb_elem->env, input, &rc))) {
         break;
       }
       input_rewind(input, rc);
@@ -345,8 +356,8 @@ ast_type_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
     }
   } else if(this->type == COMB_AND) {
     while((comb_elem = stack_next(&in_stack))) {
-      if(!(res = comb_elem->parse(input, &rc))) {
-        stack_free(&stack, ast_type_free);
+      if(!(res = comb_elem->parse(comb_elem->env, input, &rc))) {
+        stack_free(&stack, node_free);
         input_rewind(input, rc);
         rc = 0;
         break;
@@ -354,7 +365,7 @@ ast_type_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
       stack_push(&stack, res);
     }
     stack_inverse(&stack);
-    res = this->combine(stack);
+    res = this->fold(stack);
   } else {
     panic("undefined parser combinator");
   }
@@ -389,10 +400,10 @@ void parser_free(parser_t *this) {
 
 #define input_fail() {    \
   input_rewind(input, 1); \
-  return (ast_type_t*)0;  \
+  return (node_t*)0;  \
 }
 
-ast_type_t *parse_id(input_t *input, ulong *rcr) {
+node_t *parse_id(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   
@@ -407,10 +418,10 @@ ast_type_t *parse_id(input_t *input, ulong *rcr) {
   buffer[i] = 0;
 
   *rcr += rc;
-  return ast_type_new(AST_ID, str_new(buffer), (free_f)str_free);
+  return node_new(ID_NODE, str_new(buffer), (free_f)str_free);
 }
 
-ast_type_t *parse_int(input_t *input, ulong *rcr) {
+node_t *parse_int(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   
@@ -421,14 +432,14 @@ ast_type_t *parse_int(input_t *input, ulong *rcr) {
   for(;is_num(buffer[i] = input_move()); i++) {
     if(i >= MAX_STR_LEN) panic("integer string too long");
   }
-  if(strchr(".f", buffer[i])) char_fail(); // TODO: what if: 123fid
+  if(strchr(".f", buffer[i])) input_fail(); // TODO: what if: 123fid
   input_rewind(input, 1);
 
   *rcr += rc;
-  return ast_type_new(AST_INT, strtol(buffer, 0, 10), (free_f)int_free);
+  return node_new(INT_NODE, int_new(strtol(buffer, 0, 10)), (free_f)int_free);
 }
 
-ast_type_t *parse_float(input_t *input, ulong *rcr) {
+node_t *parse_float(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   size_t i = 0;
@@ -441,19 +452,38 @@ ast_type_t *parse_float(input_t *input, ulong *rcr) {
   }
   if(buffer[i] == 'f') {
     *rcr += rc;
-    return ast_type_new(AST_FLOAT, strtod(buffer, 0), (free_f)float_free);
+    return node_new(FLOAT_NODE, float_new(strtod(buffer, 0)), (free_f)float_free);
   } else if(buffer[i] == '.') {
     for(i++; is_num(buffer[i] = input_move()); i++) {
       if(i >= MAX_STR_LEN) panic("float string too long");
     }
     input_rewind(input, 1);
     *rcr += rc;
-    return ast_type_new(AST_FLOAT, strtod(buffer, 0), (free_f)float_free);
+    return node_new(FLOAT_NODE, float_new(strtod(buffer, 0)), (free_f)float_free);
   }
   input_fail();
 }
 
-ast_type_t *parse(parser_t *parser) {
+typedef struct closure_env_t {
+  char *ref;
+  node_type type;
+  int is_op;
+} closure_env_t;
+
+node_t *parse_op(closure_env_t *env, input_t *input, ulong *rcr) {
+  ulong rc = 0;
+
+  for(size_t i = 0; env->ref[i]; i++) {
+    if(input_move() != env->ref[i]) input_fail();
+  }
+  if(!env->is_op && is_alpha_num(input_peek(input))) input_fail();
+
+  *rcr += rc;
+  return node_new(env->type, 0, (free_f)nop_free);
+}
+
+
+node_t *parse(parser_t *parser) {
   ulong rc = 0;
   return comb_parse(parser->input, parser->base, &rc);
 }
@@ -474,9 +504,20 @@ comb_t *match_int() {
   return res;
 }
 
-comb_t *math_float() {
+comb_t *match_float() {
   comb_t *res = comb_new(COMB_JUST);
   res->parse = parse_float;
+  return res;
+}
+
+comb_t *match_op(char *op, node_type type) {
+  comb_t *res = comb_new(COMB_JUST);
+  closure_env_t *env = alloc(sizeof(closure_env_t));
+  env->ref = op;
+  env->type = type;
+  env->is_op = 1;
+  res->env = env;
+  res->parse = (parse_f)parse_op;
   return res;
 }
 
@@ -486,10 +527,33 @@ comb_t *match_or(stack_t *stack) {
   return res;
 }
 
-comb_t *match_and(stack_t *stack) {
+void node_stack_free(stack_t *this) {
+  if(!this) return;
+  stack_free(&this, node_free);
+}
+
+node_t *node_stack_fold(stack_t *stack) {
+  return node_new(STACK_NODE, stack, (free_f)node_stack_free);
+}
+
+comb_t *match_and(stack_t *stack, node_t *(*fold)(stack_t*)) {
   comb_t *res = comb_new(COMB_AND);
   res->stack = stack;
+  if(!fold) {
+    fold = node_stack_fold;
+  }
+  res->fold  = fold;
   return res;
+}
+
+comb_t *comb_add(comb_t *this, stack_t *stack) {
+  if(this->type == COMB_JUST) panic("unable to add to \'JUST\' combinator");
+  stack_inverse(&this->stack);
+  for(void *obj = stack_pop(&stack); obj; (obj = stack_pop(&stack))) {
+    stack_push(&this->stack, obj);
+  }
+  stack_inverse(&this->stack);
+  return this;
 }
 
 //---------------------------------------
@@ -497,38 +561,44 @@ comb_t *match_and(stack_t *stack) {
 //---------------------------------------
 
 typedef struct foo_t {
-  str_t *id;
-  int_t *int_val;
-  float_t *float_val;
+  node_t *id;
+  node_t *int_val;
+  node_t *float_val;
 } foo_t;
 
 void foo_free(foo_t *this) {}
 
-ast_type_t *test_comb(stack_t *stack) {
+node_t *test_fold(stack_t *stack) {
   foo_t *res = alloc(sizeof(foo_t));
   
   res->id        = stack_pop(&stack);
   res->int_val   = stack_pop(&stack);
+  stack_pop(&stack);
   res->float_val = stack_pop(&stack);
+  stack_pop(&stack);
   
-  return ast_type_new(AST_STR, res, (free_f)foo_free);
+  return node_new(STR_NODE, res, (free_f)foo_free);
 }
 
-void foo_print(foo_t *this) {
+void foo_print(node_t *this) {
+  foo_t *foo = this->node;
+  str_t *str = foo->id->node;
+  int_t *intval = foo->int_val->node;
+  float_t *floatval = foo->float_val->node;
   printf("foo:\n");
-  printf("id: %s\n", this->id);
-  printf("int_val: %d\n", this->int_val->val);
-  printf("float_val: %lf\n", this->float_val->val);
+  printf("id: %s\n", str->val);
+  printf("int_val: %d\n", intval->val);
+  printf("float_val: %lf\n", floatval->val);
 }
 
-int main(int argc, char *argv) {
+int main(int argc, char **argv) {
   if(argc < 2) panic("no input file specified");
-  FILE *file = fopen(argv[1]);
+  FILE *file = fopen(argv[1], "r");
   if(!file) panic("unable to open input file");
   
-  comb_t *base = match_and(stack_from(match_id(), match_int(), match_float()));
+  comb_t *base = match_and(stack_from(match_id(), match_int(), match_op("(", 1), match_float(), match_op(")", 2),0), test_fold);
   
-  parser_t *parser = parser_new(file, base);
+  parser_t *parser = parser_new(input_new(file), base);
   
   foo_print(parse(parser));
   
