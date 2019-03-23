@@ -319,7 +319,8 @@ void char_free(char_t *this) {
 typedef enum comb_e {
  COMB_JUST,
  COMB_OR,
- COMB_AND
+ COMB_AND,
+ COMB_OPT
 } comb_e;
 
 typedef node_t*(*parse_f)(void*, input_t*, ulong*);
@@ -327,11 +328,25 @@ typedef node_t*(*parse_f)(void*, input_t*, ulong*);
 typedef struct comb_t {
   comb_e type;
   union {
-    parse_f parse;
-    stack_t *stack;
+    // -- JUST
+    struct {
+      parse_f parse;
+      void *env;
+    };
+    // -- OR/AND
+    struct {
+      stack_t *stack;
+      node_t *(*fold)(stack_t*); // -- AND 
+    };
+    // -- OPT
+    struct {
+      struct comb_t *elem;
+      struct comb_t *sep;
+      // 1 if sep needs to be at the end | 0 otherwise
+      // if 1 there also needs to be an element in front of last sep
+      int sl; 
+    };
   };
-  node_t *(*fold)(stack_t*); //only important for and parser
-  void *env;
 } comb_t;
 
 comb_t *comb_new(comb_e type) {
@@ -351,7 +366,7 @@ void comb_free(comb_t *this) {
 }
 
 node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
-  node_t *res = 0;
+  node_t     *res = 0;
   stack_t    *stack = 0;
   stack_t    *in_stack = this->stack;
   comb_t     *comb_elem = 0;
@@ -360,7 +375,7 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
     res = this->parse(this->env, input, &rc);
   } else if(this->type == COMB_OR) {
     while((comb_elem = stack_next(&in_stack))) {
-      if((res = comb_elem->parse(comb_elem->env, input, &rc))) {
+      if((res = comb_parse(input, comb_elem, &rc))) {
         break;
       }
       input_rewind(input, rc);
@@ -368,7 +383,7 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
     }
   } else if(this->type == COMB_AND) {
     while((comb_elem = stack_next(&in_stack))) {
-      if(!(res = comb_elem->parse(comb_elem->env, input, &rc))) {
+      if(!(res = comb_parse(input, comb_elem, &rc))) {
         stack_free(&stack, node_free);
         input_rewind(input, rc);
         rc = 0;
@@ -378,6 +393,27 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
     }
     stack_inverse(&stack);
     res = this->fold(stack);
+  } else if(this->type == COMB_OPT) {
+    if(!(res = comb_parse(input, this->elem, &rc))) {
+      input_rewind(input, rc); // prob not necessary
+      rc = 0;
+    } else {
+      stack_push(&stack, res);
+      while(comb_parse(input, this->sep, &rc)) {
+        if(!(res = comb_parse(input, this->elem, &rc))) {
+          stack_free(&stack, node_free);
+          input_rewind(input, rc);
+          rc = 0;
+          break;
+        }
+        stack_push(&stack, res);
+      }
+      if(this->sl && !comb_parse(input, this->sep, &rc)) {
+        stack_free(&stack, node_free);
+        input_rewind(input, rc);
+        rc = 0;
+      }
+    }
   } else {
     panic("undefined parser combinator");
   }
@@ -653,6 +689,14 @@ comb_t *comb_add(comb_t *this, stack_t *stack) {
   }
   stack_inverse(&this->stack);
   return this;
+}
+
+comb_t *match_list(comb_t *elem, comb_t *sep, int sl) {
+  comb_t *res = comb_new(COMB_OPT);
+  res->elem = elem;
+  res->sep  = sep;
+  res->sl   = sl;
+  return res;
 }
 
 //---------------------------------------
