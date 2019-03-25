@@ -23,6 +23,7 @@ typedef long unsigned int ulong;
 #define STACK_NODE -6
 
 typedef int node_type;
+typedef void (*free_f)(void*);
 
 //---------------------------------------
 // UTIL 
@@ -203,7 +204,7 @@ output_t *output_new(FILE *file) {
 
 void output_free(output_t *this) {
   if(!this) return;
-  if(!fclose(this->file) == EOF) error("unable to close output stream");
+  if(fclose(this->file) == EOF) error("unable to close output stream");
   free(this);
 }
 
@@ -291,8 +292,6 @@ node_t *node_stack_fold(stack_t *stack) {
 //---------------------------------------
 
 // -- STRING ----------------------------
-
-typedef void (*free_f)(void*);
 
 typedef struct str_t {
   char *val;
@@ -403,6 +402,7 @@ typedef struct comb_t {
       int sl; 
     };
   };
+  int ff;
 } comb_t;
 
 comb_t *comb_new() {
@@ -413,6 +413,8 @@ comb_t *comb_new() {
 
 void comb_free(comb_t *this) {
   if(!this) return;
+  if(this->ff) return;
+  this->ff = 1;
   switch(this->type) {
     case COMB_NONE: break;
     case COMB_JUST:
@@ -777,26 +779,21 @@ comb_t *match_list(comb_t *this, comb_t *elem, comb_t *sep, int sl) {
 
 // -- UTIL ------------------------------
 
-void strl_emit(str_t *this, output_t *out) {
-  emit(out, "\"");
-  str_emit(this, out);
-  emit(out, "\"");
-}
-
-void charl_emit(char_t *this, output_t *out) {
-  emit(out, "'");
-  char_emit(this, out);
-  emit(out, "'");
-}
-
-void stack_emit(stack_t *this, output_t *out, void (*emit_f)(void*, output_t*)) {
-  for(void *obj = stack_next(&this); (obj = stack_next(&this))) {
+typedef void (*stack_emit_f)(void*, output_t*);
+void stack_emit(stack_t *this, output_t *out, stack_emit_f emit_f) {
+  for(void *obj = stack_next(&this); (obj = stack_next(&this));) {
     emit_f(obj, out);
   }
 }
 
 void char_emit(char_t *this, output_t *out) {
   femit(out, "%c",  this->val);
+}
+
+void charl_emit(char_t *this, output_t *out) {
+  emit(out, "'");
+  char_emit(this, out);
+  emit(out, "'");
 }
 
 void int_emit(int_t *this, output_t *out) {
@@ -807,12 +804,21 @@ void str_emit(str_t *this, output_t *out) {
   emit(out, this->val);
 }
 
+void strl_emit(str_t *this, output_t *out) {
+  emit(out, "\"");
+  str_emit(this, out);
+  emit(out, "\"");
+}
+
 //---------------------------------------
 // CUSTOM_NODE_TYPES
 //---------------------------------------
 // -- DECLARATIONS ----------------------
-struct struct_t;
-struct var_t;
+typedef struct struct_t struct_t;
+typedef struct var_t var_t;
+void var_free(var_t *this);
+void var_emit(var_t *this, output_t *out);
+node_t *var_fold(stack_t *stack);
 // --  ----------------------------------
 #define U8_NODE 1
 #define I8_NODE 2
@@ -835,16 +841,28 @@ struct var_t;
 #define R_R_B_NODE 53
 #define L_S_B_NODE 54
 #define R_S_B_NODE 55
+#define ARROW_NODE 100
+#define COMMA_NODE 101
 
 #define COLON_NODE 56
 #define SEMICOLON_NODE 57
+
+// -- TYPE ------------------------------
+
+void type_emit_head(node_t *this, output_t *out) {
+  emit(out, "int");
+}
+
+void type_emit_tail(node_t *this, output_t *out) {
+  
+}
 
 // -- VARIABLE --------------------------
 
 typedef struct var_t {
   str_t  *id;
   node_t *type;
-} var_node_t;
+} var_t;
 
 void var_free(var_t *this) {
   if(!this) return;
@@ -854,9 +872,9 @@ void var_free(var_t *this) {
 }
 
 void var_emit(var_t *this, output_t *out) {
-  // TODO
-  emit(out, "int ");
+  type_emit_head(this->type, out);
   str_emit(this->id, out);
+  type_emit_tail(this->type, out);
 }
 
 node_t *var_fold(stack_t *stack) {
@@ -885,7 +903,7 @@ node_t *struct_fold(stack_t *stack) {
   struct_t *res = alloc(sizeof(stack_t));
   res->id = node_unwrap(stack_pop(&stack));
   res->vars = node_unwrap(stack_pop(&stack));
-  return node_new(STRUCT_NODE, res, (free_f)stack_free);
+  return node_new(STRUCT_NODE, res, (free_f)struct_free);
 }
 
 void var_member_emit(node_t *this, output_t *out) {
@@ -897,33 +915,92 @@ void struct_emit(struct_t *this, output_t *out) {
   emit(out, "struct ");
   str_emit(this->id, out);
   emit_line(out, "{");
-  stack_emit(this->vars, out, var_member_emit);
+  stack_emit(this->vars, out, (stack_emit_f)var_member_emit);
   emit(out, "};");
+}
+
+// -- FUNCTION --------------------------
+
+typedef struct fun_t {
+  str_t   *id;
+  node_t  *type;
+  stack_t *params;
+  stack_t *stms;
+} fun_t;
+
+void function_free(fun_t *this) {
+  if(!this) return;
+  str_free(this->id);
+  node_free(this->type);
+  stack_free(this->params, node_free);
+  stack_free(this->stms, node_free);
+  free(this);
+}
+
+node_t *fun_fold(stack_t *stack) {
+  fun_t *res = alloc(sizeof(fun_t));
+  res->id = node_unwrap(stack_pop(&stack));
+  res->type = stack_pop(&stack);
+  res->params = node_unwrap(stack_pop(&stack));
+  res->stms = node_unwrap(stack_pop(&stack));
+  return res;
+}
+
+void var_param_emit(node_t *this, output_t *out) {
+  var_emit(this->node, out);
+}
+
+void stm_node_emit(node_t *this, output_t *out) {
+  stm_emit(this->node, out);
+}
+
+void fun_emit(fun_t *this, output_t *out) {
+  type_emit_head(this->type, out);
+  str_emit(this->id, out);
+  emit(out, "(");
+  stack_emit(this->params, var_param_emit);
+  emit(out, ")");
+  type_emit_tail(this->type, out);
+  emit_line(out, "{");
+  stack_emit(this->stms, stm_node_emit);
 }
 
 // --  ----------------------------------
 
 comb_t *base_comb() {
-  comb_t *struct_comb   = comb_new();
-  comb_t *var_comb      = comb_new();
-  comb_t *var_list_comb = comb_new();
-  comb_t *type_comb     = comb_new();
+  comb_t *base_comb       = comb_new();
+  comb_t *struct_comb     = comb_new();
+  comb_t *fun_comb        = comb_new();
+  comb_t *var_comb        = comb_new();
+  comb_t *var_list_comb   = comb_new();
+  comb_t *param_list_comb = comb_new();
+  comb_t *type_comb       = comb_new();
+  comb_t *stm_comb        = comb_new();
 
   // operators
   comb_t *l_c_b_o     = match_op("{", L_C_B_NODE);
   comb_t *r_c_b_o     = match_op("}", R_C_B_NODE);
+  comb_t *l_r_b_o     = match_op("(", L_R_B_NODE);
+  comb_t *r_r_b_o     = match_op(")", R_R_B_NODE);
+  comb_t *l_s_b_o     = match_op("[", L_S_B_NODE);
+  comb_t *r_s_b_o     = match_op("]", R_S_B_NODE);
+  comb_t *arrow_o     = match_op("->", ARROW_NODE);
   comb_t *colon_o     = match_op(":", COLON_NODE);
   comb_t *semicolon_o = match_op(";", SEMICOLON_NODE);
+  comb_t *comma_o     = match_op(","; COMMA_NODE);
   
   // keywords
   comb_t *u8_k = match_key("u8", U8_NODE);
   
-  type_comb     = match_or(type_comb, stack_from(match_id(), u8_k, 0));
-  var_comb      = match_and(var_comb, stack_from(match_id(), colon_o, type_comb, 0), var_fold);
-  var_list_comb = match_opt(var_list_comb, var_comb, semicolon_o, 1);
-  struct_comb   = match_and(struct_comb, stack_from(match_id(), l_c_b_o, var_list_comb, r_c_b_o, 0), struct_fold);
-  
-  return struct_comb;
+  type_comb       = match_or(type_comb, stack_from(match_id(), u8_k, 0));
+  var_comb        = match_and(var_comb, stack_from(match_id(), colon_o, type_comb, 0), var_fold);
+  var_list_comb   = match_opt(var_list_comb, var_comb, semicolon_o, 1);
+  param_list_comb = match_opt(param_list_comb, var_comb, comma_o, 0);
+  struct_comb     = match_and(struct_comb, stack_from(match_id(), l_c_b_o, var_list_comb, r_c_b_o, 0), struct_fold);
+  fun_comb        = match_and(fun_comb, stack_from(match_id(), l_r_b_o, param_list_comb, r_r_b_o, arrow_o, type_comb, stm_comb, 0), fun_fold);
+  stm_comb        = match_or(stm_comb, stack_from(semicolon_o));
+
+  return match_or(base_comb, stack_from(struct_comb, fun_comb, 0));
 }
 
 //---------------------------------------
@@ -931,16 +1008,57 @@ comb_t *base_comb() {
 
 
 int main(int argc, char **argv) {
+  printf("+---------------------------+\n");
+  printf("| Starting SC-Lang Compiler |\n");
+  printf("| Author:  Gerrit Proessl   |\n");
+  printf("| Version: 0.0.1            |\n");
+  printf("+---------------------------+\n");
+
+  // open input file
   if(argc < 2) panic("no input file specified");
-  FILE *file = fopen(argv[1], "r");
+  FILE *inf = fopen(argv[1], "r");
   if(!file) panic("unable to open input file");
+  // oupen output file
+
+  File *outf = stdout;
+  if(argc == 3) {
+    outf = fopen(argv[2], "w");
+    if(!outf) panic("unable to open outpuf file");
+  }
+
+  input_t  *input  = input_new(inf);
+  output_t *output = output_new(outf);
   
-  parser_t *parser = parser_new(input_new(file), base_comb());
-  struct_t *s = parse(parser);
+  parser_t *parser = parser_new(input, base_comb());
+
+  for(node_t *node = 0;;) {
+    node = parse(parser);
+    if(!node) break;
+    switch(node->type) {
+      case STRUCT_NODE: {
+        struct_t *s = node->node;
+        log("parsed struct: %s", s->id->val);
+        struct_emit(s, out);
+        break;
+      }
+      case FUN_NODE: {
+        fun_t *f = node->node;
+        log("parse function: %s", f->id->val);
+        fun_emit(f, out);
+        break;
+      }
+      default:
+        panic("parsed undefined node");
+    }
+  }
+
   
-  printf("finished parsing\n");
+  printf("done!\n");
   
+  // cleanup
   parser_free(parser);
+  input_free(input);
+  output_free(output);
   
   return 0;
 }
