@@ -834,6 +834,13 @@ node_t *var_fold(stack_t *stack);
 #define PTR_NODE 12
 #define STRUCT_NODE 13
 #define VAR_NODE 14
+#define FUN_NODE 66
+
+// STATEMENTS
+#define EXP_STM_NODE 301
+#define JPM_STM_NODE     303
+#define LABEL_STM_NODE   304
+#define RET_STM_NODE 305
 
 #define L_C_B_NODE 50
 #define R_C_B_NODE 51
@@ -855,6 +862,11 @@ void type_emit_head(node_t *this, output_t *out) {
 
 void type_emit_tail(node_t *this, output_t *out) {
   
+}
+
+void type_emit(node_t *this, output_t *out) {
+  type_emit_head(this, out);
+  type_emit_tail(this, out);
 }
 
 // -- VARIABLE --------------------------
@@ -895,14 +907,16 @@ typedef struct struct_t {
 void struct_free(struct_t *this) {
   if(!this) return;
   str_free(this->id);
-  stack_free(&this->vars, var_free);
+  stack_free(&this->vars, node_free);
   free(this);
 }
 
 node_t *struct_fold(stack_t *stack) {
   struct_t *res = alloc(sizeof(stack_t));
-  res->id = node_unwrap(stack_pop(&stack));
-  res->vars = node_unwrap(stack_pop(&stack));
+  res->id = node_unwrap(stack_pop(&stack));      // id
+  node_free(stack_pop(&stack));                  // {
+  res->vars = node_unwrap(stack_pop(&stack));    // vars
+  node_free(stack_pop(&stack));                  //
   return node_new(STRUCT_NODE, res, (free_f)struct_free);
 }
 
@@ -924,14 +938,16 @@ void struct_emit(struct_t *this, output_t *out) {
 typedef struct fun_t {
   str_t   *id;
   node_t  *type;
+  stack_t *decls;
   stack_t *params;
   stack_t *stms;
 } fun_t;
 
-void function_free(fun_t *this) {
+void fun_free(fun_t *this) {
   if(!this) return;
   str_free(this->id);
   node_free(this->type);
+  stack_free(this->decls, node_free);
   stack_free(this->params, node_free);
   stack_free(this->stms, node_free);
   free(this);
@@ -939,11 +955,18 @@ void function_free(fun_t *this) {
 
 node_t *fun_fold(stack_t *stack) {
   fun_t *res = alloc(sizeof(fun_t));
-  res->id = node_unwrap(stack_pop(&stack));
-  res->type = stack_pop(&stack);
-  res->params = node_unwrap(stack_pop(&stack));
-  res->stms = node_unwrap(stack_pop(&stack));
-  return res;
+  res->id = node_unwrap(stack_pop(&stack));        // id
+  node_free(stack_pop(&stack));                    // (
+  res->params = node_unwrap(stack_pop(&stack));    // params
+  node_free(stack_pop(&stack));                    // )
+  node_free(stack_pop(&stack));                    // ->
+  res->type = stack_pop(&stack);                   // type
+  node_free(stack_pop(&stack));                    // :
+  res->decls = node_unwrap(stack_pop(&stack));     // decls
+  node_free(stack_pop(&stack));                    // {
+  res->stms = node_unwrap(stack_pop(&stack));      // stms
+  node_free(stack_pop(&stack));                    // }
+  return node_new(FUN_NODE, res, (free_f)fun_free);
 }
 
 void var_param_emit(node_t *this, output_t *out) {
@@ -963,6 +986,138 @@ void fun_emit(fun_t *this, output_t *out) {
   type_emit_tail(this->type, out);
   emit_line(out, "{");
   stack_emit(this->stms, stm_node_emit);
+}
+
+// -- STATEMENT -------------------------
+
+// EXP_STM_NODE: node_t
+// LABEL_STM_NODE: str_t
+// JMP_STM_NODE: jmp_stm_t
+// RET_STM_NODE: exp_t
+
+node_t *exp_stm_fold(stack_t *stack) {
+  node_t *res = stack_pop(&stack); // exp
+  node_free(stack_pop(&stack));    // :
+  return node_new(EXP_STM_NODE, res, (free_f)node_free);
+}
+
+node_t *label_stm_fold(stack_t *stack) {
+  str_t *res = node_unwrap(stack_pop(&stack)); // id
+} // TODO
+
+typedef jmp_stm_t {
+  exp_t *con; // no condition if 0
+  str_t *label;
+} jmp_stm_t;
+
+void jmp_stm_free(jmp_stm_t *this) {
+  if(!this) return;
+  exp_free(this->con);
+  str_free(this->label);
+}
+
+void jmp_stm_emit(jmp_stm_t *this, output_t *out) {
+  emit(out, "if(");
+  if(this->con) exp_emit(this->con);
+  else emit(out, "1");
+  emit(out, ") goto ");
+  str_emit(this->label, out);
+  emit_line(out, ";");
+}
+
+void stm_emit(node_t *this, output_t *out) {
+  switch(this->type) {
+    case EXP_STM_NODE:
+      exp_emit(this->node, out);
+      break;
+    case LABE_STM_NODE:
+      femit(out, "%s:\n", this->node->val);
+      break;
+    case JMP_STM_NODE:
+      jmp_stm_emit(this->node);
+      break;
+    case RET_STM_NODE:
+      emit(out, "return ");
+      exp_emit(this->node, out);
+      emit_line(out, ";");
+      break;
+  }
+}
+
+// -- EXPRESSION ------------------------
+
+// INT_EXP: int_t
+// ID_EXP: str_t
+// STR_EXP: str_t
+// FLOAT_EXP: float_t
+// BRACKET_EXP: node_t
+// DOT_EXP: bin_exp_t
+// ARROW_EXP: bin_exp_t
+// CAST_EXP: bin_exp_t
+// SIZEOF_EXP: type_t
+
+typedef struct bin_exp_t {
+  node_t *lh;
+  node_t *rh;
+} bin_exp_t;
+
+void bin_exp_free(bin_exp_t *this) {
+  if(!this) return;
+  node_free(this->lh);
+  node_free(this->rh);
+  free(this);
+}
+
+void exp_emit(node_t *this, output_t *out) {
+  emit(out, "(");
+  switch(this->type) {
+    case INT_EXP:
+      int_emit(this->node, out);
+      break;
+    case ID_EXP:
+      str_emit(this->node, out);
+      break;
+    case STR_EXP:
+      emit(out, "\"");
+      str_emit(this->node, out);
+      emit(out, "\"");
+      break;
+    case FLOAT_EXP:
+      float_emit(this->node, out);
+      break;
+    case BRACKET_EXP:
+      exp_emit(this->node);
+      break;
+    case DOT_EXP: {
+      bin_exp_t *exp = this->node;
+      exp_emit(exp->lh, out);
+      emit(out, ".");
+      exp_emit(exp->rh, out);
+      break;
+    }
+    case ARROW_EXP: {
+      bin_exp_t *exp = this->node;
+      exp_emit(exp->lh, out);
+      emit(out, "->");
+      exp_emit(exp->rh, out);
+      break;
+    }
+    case CAST_EXP: {
+      bin_exp_t *exp = this->node;
+      emit(out, "(");
+      type_emit(exp->lh, out);
+      emit(out, ")(");
+      exp_emit(exp->rh, out);
+      emit(out, ")");
+      break;
+    }
+    case SIZEOF_EXP:
+      emit(out, "sizeof(");
+      type_emit(this->node, out);
+      emit(out, ")";
+      break;
+  }
+  emit(out, ")";
 }
 
 // --  ----------------------------------
