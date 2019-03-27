@@ -842,17 +842,33 @@ node_t *var_fold(stack_t *stack);
 #define LABEL_STM_NODE   304
 #define RET_STM_NODE 305
 
+// EXPRESSIONS
+#define INT_EXP_NODE 700
+#define ID_EXP_NODE  701
+#define FLOAT_EXP_NODE 702
+#define BRACKET_EXP_NODE 703
+#define DOT_EXP_NODE 704
+#define ARROW_EXP_NODE 705
+#define CAST_EXP_NODE 706
+#define SIZEOF_EXP_NODe 707
+
 #define L_C_B_NODE 50
 #define R_C_B_NODE 51
 #define L_R_B_NODE 52
 #define R_R_B_NODE 53
 #define L_S_B_NODE 54
 #define R_S_B_NODE 55
+#define LT_NODE    801
+#define GT_NODE    802
+#define DOT_NODE   800
 #define ARROW_NODE 100
 #define COMMA_NODE 101
-
 #define COLON_NODE 56
 #define SEMICOLON_NODE 57
+
+#define SIZEOF_NODE 400
+#define JMP_NODE    401
+#define RET_NODE    402
 
 // -- TYPE ------------------------------
 
@@ -993,7 +1009,7 @@ void fun_emit(fun_t *this, output_t *out) {
 // EXP_STM_NODE: node_t
 // LABEL_STM_NODE: str_t
 // JMP_STM_NODE: jmp_stm_t
-// RET_STM_NODE: exp_t
+// RET_STM_NODE: node_t
 
 node_t *exp_stm_fold(stack_t *stack) {
   node_t *res = stack_pop(&stack); // exp
@@ -1003,10 +1019,37 @@ node_t *exp_stm_fold(stack_t *stack) {
 
 node_t *label_stm_fold(stack_t *stack) {
   str_t *res = node_unwrap(stack_pop(&stack)); // id
-} // TODO
+  node_free(stack_pop(&stack));
+  return node_new(LABEL_STM_NODE, res, (free_f)str_free);
+} 
+
+node_t *jmp_stm_con_fold(stack_t *stack) {
+  jmp_stm_t *res = alloc(sizeof(jmp_stm_t));
+  node_free(stack_pop(&stack));                   // jmp
+  res->con = stack_pop(&stack);                   // con
+  res->label = node_unwrap(stack_pop(&stack));    // label
+  node_free(stack_pop(&stack));                   // ;
+  return node_new(JMP_STM_NODE, res, (free_f)jmp_stm_free);
+}
+
+node_t *jmp_stm_fold(stack_t *stack) {
+  jmp_stm_t *res = alloc(sizeof(jmp_stm_t));
+  node_free(stack_pop(&stack));                   // jmp
+  res->con = 0;
+  res->label = node_unwrap(stack_pop(&stack));    // label
+  node_free(stack_pop(&stack));                   // ;
+  return node_new(JMP_STM_NODE, res, (free_f)jmp_stm_free);
+}
+
+node_t *ret_stm_fold(stack_t *stack) {
+  node_free(stack_pop(&stack));        // ret
+  node_t *res = stack_pop(&stack);     // exp
+  node_free(stack_pop(&stack));        // ;
+  return node_new(RET_STM_NODE, res, (free_f)node_free);
+}
 
 typedef jmp_stm_t {
-  exp_t *con; // no condition if 0
+  node_t *con; // no condition if 0
   str_t *label;
 } jmp_stm_t;
 
@@ -1027,6 +1070,8 @@ void jmp_stm_emit(jmp_stm_t *this, output_t *out) {
 
 void stm_emit(node_t *this, output_t *out) {
   switch(this->type) {
+    case SEMICOLON_NODE:
+      break;
     case EXP_STM_NODE:
       exp_emit(this->node, out);
       break;
@@ -1055,6 +1100,71 @@ void stm_emit(node_t *this, output_t *out) {
 // ARROW_EXP: bin_exp_t
 // CAST_EXP: bin_exp_t
 // SIZEOF_EXP: type_t
+// CALL_EXP: 
+
+node_t *int_exp_fold(stack_t *stack) {
+  int_t *res = node_unwrap(stack_pop(&stack)); // int
+  return node_new(INT_EXP, res, (free_f)int_free);
+}
+
+node_t *id_exp_fold(stack_t *stack) {
+  str_t *res = node_unwrap(stack_pop(&stack)); // id
+  return node_new(ID_EXP, res, (free_f)str_free);
+}
+
+node_t *str_exp_fold(stack_t *stack) {
+  str_t *res = node_unwrap(stack_pop(&stack)); // str
+  return node_new(STR_EXP, res, (free_f)str_free);
+}
+
+node_t *float_exp_fold(stack_t *stack) {
+  float_t *res = node_unwrap(stack_pop(&stack)); // float
+  return node_new(FLOAT_EXP, res, (free_f)float_free);
+}
+
+node_t *bracket_exp_fold(stack_t *stack) {
+  node_free(stack_pop(&stack));       // (
+  node_t * res = stack_pop(&stack);   // exp
+  node_free(stack_pop(&stack));       // )
+  return node_new(BRACKET_EXP, res, (free_f)node_free);
+}
+
+node_t *dot_exp_fold(stack_t *stack) {
+  bin_exp_t *res = alloc(sizeof(bin_exp_t));
+  res->lh = stack_pop(&stack);     // exp
+  node_free(stack_unwrap(&stack)); // .
+  res->lh = stack_pop(&stack);     // exp
+  return node_new(DOT_EXP, res, (free_f)bin_exp_free);
+}
+
+node_t *arrow_exp_fold(stack_t *stack) {
+  bin_exp_t *res = alloc(sizeof(bin_exp_t));
+  res->lh = stack_pop(&stack);     // exp
+  node_free(stack_unwrap(&stack)); // ->
+  res->lh = stack_pop(&stack);     // exp
+  return node_new(ARROW_EXP, res, (free_f)bin_exp_free);
+}
+
+node_t *cast_exp_fold(stack_t *stack) {
+  bin_exp_t *res = alloc(sizeof(bin_exp_t));
+  node_free(stack_pop(&stack));       // <
+  res->lh = stack_pop(&stack);        // type
+  node_free(stack_pop(&stack));       // >
+  res->rh = stack_pop(&stack);        // exp
+  return node_new(CAST_EXP, res, (free_f)bin_exp_free);
+}
+
+node_t *sizeof_exp_fold(stack_t *stack) {
+  node_free(stack_pop(&stack));    // sizeof
+  node_free(stack_pop(&stack));    // (
+  node_t *res = stack_pop(&stack); // type
+  node_free(stack_pop(&stack));    // )
+  return node_new(SIZEOF_EXP, res, (free_f)bin_exp_free);
+}
+
+node_t *call_exp_fold(stack_t *stack) {
+  call_exp_t *res = //TODO (add 1 2)
+}
 
 typedef struct bin_exp_t {
   node_t *lh;
@@ -1065,6 +1175,18 @@ void bin_exp_free(bin_exp_t *this) {
   if(!this) return;
   node_free(this->lh);
   node_free(this->rh);
+  free(this);
+}
+
+typedef struct call_exp_t {
+  node_t *exp;
+  stack_t *args);
+} call_exp_t;
+
+void call_exp_free(call_exp_t *this) {
+  if(!this) return;
+  node_free(this->exp);
+  stack_free(&this->args, node_free);
   free(this);
 }
 
@@ -1123,14 +1245,34 @@ void exp_emit(node_t *this, output_t *out) {
 // --  ----------------------------------
 
 comb_t *base_comb() {
-  comb_t *base_comb       = comb_new();
-  comb_t *struct_comb     = comb_new();
-  comb_t *fun_comb        = comb_new();
-  comb_t *var_comb        = comb_new();
-  comb_t *var_list_comb   = comb_new();
-  comb_t *param_list_comb = comb_new();
-  comb_t *type_comb       = comb_new();
-  comb_t *stm_comb        = comb_new();
+  comb_t *base_comb        = comb_new();
+  comb_t *struct_comb      = comb_new();
+  comb_t *fun_comb         = comb_new();
+  comb_t *var_comb         = comb_new();
+  comb_t *var_list_comb    = comb_new();
+  comb_t *param_list_comb  = comb_new();
+  comb_t *type_comb        = comb_new();
+  comb_t *stm_comb         = comb_new();
+  comb_t *pexp_comb        = comb_new(); // primary expression
+  comb_t *exp_comb         = comb_new();
+  
+  // statements 
+  comb_t *exp_stm_comb     = comb_new();
+  comb_t *label_stm_comb   = comb_new();
+  comb_t *jmp_stm_con_comb = comb_new();
+  comb_t *jmp_stm_comb     = comb_new();
+  comb_t *ret_stm_comb     = comb_new();
+  
+  // expressions
+  comb_t *int_exp_comb     = comb_new();
+  comb_t *id_exp_comb      = comb_new();
+  comb_t *str_exp_comb     = comb_new();
+  comb_t *float_exp_comb   = comb_new();
+  comb_t *bracket_exp_comb = comb_new();
+  comb_t *dot_exp_comb     = comb_new();
+  comb_t *arrow_exp_comb   = comb_new();
+  comb_t *cast_exp_comb    = comb_new();
+  comb_t *sizeof_exp_comb  = comb_new();
 
   // operators
   comb_t *l_c_b_o     = match_op("{", L_C_B_NODE);
@@ -1139,13 +1281,20 @@ comb_t *base_comb() {
   comb_t *r_r_b_o     = match_op(")", R_R_B_NODE);
   comb_t *l_s_b_o     = match_op("[", L_S_B_NODE);
   comb_t *r_s_b_o     = match_op("]", R_S_B_NODE);
+  comb_t *lt_o        = match_op("<", LT_NODE);
+  comb_t *gt_o        = match_op(">", GT_NODE);
+  comb_t *dot_o       = match_op(".", DOT_NODE);
   comb_t *arrow_o     = match_op("->", ARROW_NODE);
   comb_t *colon_o     = match_op(":", COLON_NODE);
   comb_t *semicolon_o = match_op(";", SEMICOLON_NODE);
   comb_t *comma_o     = match_op(","; COMMA_NODE);
   
   // keywords
-  comb_t *u8_k = match_key("u8", U8_NODE);
+  comb_t *u8_k  = match_key("u8", U8_NODE);
+  comb_t *u16_k = match_key("u8", U8_NODE);
+  comb_t *sizeof_k = match_key("sizeof", SIZEOF_NODE);
+  comb_t *jmp_k    = match_key("jmp", JMP_NODE);
+  comb_t *ret_k    = match_key("ret", RET_NODE);
   
   type_comb       = match_or(type_comb, stack_from(match_id(), u8_k, 0));
   var_comb        = match_and(var_comb, stack_from(match_id(), colon_o, type_comb, 0), var_fold);
@@ -1153,7 +1302,28 @@ comb_t *base_comb() {
   param_list_comb = match_opt(param_list_comb, var_comb, comma_o, 0);
   struct_comb     = match_and(struct_comb, stack_from(match_id(), l_c_b_o, var_list_comb, r_c_b_o, 0), struct_fold);
   fun_comb        = match_and(fun_comb, stack_from(match_id(), l_r_b_o, param_list_comb, r_r_b_o, arrow_o, type_comb, stm_comb, 0), fun_fold);
-  stm_comb        = match_or(stm_comb, stack_from(semicolon_o));
+  
+  pexp_comb       = match_or(pexp_comb, stack_from(int_exp_comb, id_exp_comb, str_exp_comb, float_exp_comb, bracket_exp_comb, cast_exp_comb, sizeof_exp_comb);
+  exp_comb        = match_or(exp_comb, stack_from(pexp_comb, dot_exp_comb, arrow_exp_comb, call_exp_comb));
+
+  stm_comb        = match_or(stm_comb, stack_from(semicolon_o, exp_stm_comb, label_stm_comb, jmp_stm_comb, jmp_stm_con_comb, ret_stm_comb));
+  
+  // statements
+  exp_stm_comb     = match_and(exp_stm_comb, stack_from(exp_comb, semicolon_o, 0), exp_stm_fold);
+  label_stm_comb   = match_and(label_stm_comb, stack_from(match_id(), colon_o, 0), label_stm_fold);
+  jmp_stm_con_comb = match_and(jmp_stm_comb, stack_from(jmp_k, exp_comb, match_id(), semicolon_o, 0), jmp_stm_con_fold);
+  jmp_stm_comb     = match_and(jmp_stm_comb, stack_from(jmp_k, match_id(), semicolon_o, 0), jmp_stm_fold);
+  ret_stm_comb     = match_and(ret_stm_comb, stack_from(ret_k, exp_comb, semicolon_o, 0), ret_stm_fold);
+
+  // expressions
+  int_exp_comb     = match_and(int_exp_comb, stack_from(match_int(), 0), int_exp_fold);
+  id_exp_comb      = match_and(id_exp_comb, stack_from(match_id(), 0), id_exp_fold);
+  str_exp_comb     = match_and(str_exp_comb, stack_from(match_str(), 0), str_exp_fold);
+  float_exp_comb   = match_and(float_exp_comb, stack_from(match_float(), 0), float_exp_fold);
+  bracket_exp_comb = match_and(bracket_exp_comb, stack_from(l_r_b_o, exp_comb, r_r_b_o, 0), bracket_exp_fold);
+  dot_exp_comb     = match_and(dot_exp_comb, stack_from(pexp_comb, dot_o, pexp_comb, 0), dot_exp_fold);
+  arrow_exp_comb   = match_and(arrow_exp_comb, stack_from(pexp_comb, arrow_o, pexp_comb, 0), arrow_exp_fold);
+  cast_exp_comb    = match_and(cast_exp_comb, stack_from(lt_o, type_comb, gt_o, exp_comb, 0), cast_exp_fold);
 
   return match_or(base_comb, stack_from(struct_comb, fun_comb, 0));
 }
