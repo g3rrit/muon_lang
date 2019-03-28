@@ -1100,7 +1100,7 @@ void stm_emit(node_t *this, output_t *out) {
 // ARROW_EXP: bin_exp_t
 // CAST_EXP: bin_exp_t
 // SIZEOF_EXP: type_t
-// CALL_EXP: 
+// CALL_EXP: stack_t
 
 node_t *int_exp_fold(stack_t *stack) {
   int_t *res = node_unwrap(stack_pop(&stack)); // int
