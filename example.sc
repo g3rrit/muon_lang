@@ -1,10 +1,12 @@
+main () -> u8 {
+  (add 1 2);
+  jmp label;
+label:
+  ret 0;
+}
 
 foo_t {
  i : u8;
  n: u8;
 }
 
-main (l : u8) -> u8
-bar : u8 = 0; {
-  ret 0;
-}
