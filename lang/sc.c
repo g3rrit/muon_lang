@@ -141,17 +141,26 @@ stack_t *stack_from(void *obj, ...) {
 
 typedef struct input_t {
   FILE *file;
+  int is_std;
 } input_t;
 
 input_t *input_new(FILE *file) {
   input_t *res = alloc(sizeof(input_t));
-  res->file = file;
+  if(!file) {
+    res->file = stdin;
+    res->is_std = 1;
+  } else {
+    res->file = file;
+    res->is_std = 0;
+  }
   return res;
 }
 
 void input_free(input_t *this) {
   if(!this) return;
-  if(fclose(this->file) == EOF) error("unable to close input stream");
+  if(!this->is_std) {
+    if(fclose(this->file) == EOF) error("unable to close input stream");
+  }
   free(this);
 }
 
@@ -194,17 +203,26 @@ int input_skip(input_t *this, char *set) {
 
 typedef struct output_t {
   FILE *file;
+  int is_std;
 } output_t;
 
 output_t *output_new(FILE *file) {
   output_t *res = alloc(sizeof(output_t));
-  res->file = file;
+  if(!file) {
+    res->file = stdout;
+    res->is_std = 1;
+  } else {
+    res->file = file;
+    res->is_std = 0;
+  }
   return res;
 }
 
 void output_free(output_t *this) {
   if(!this) return;
-  if(fclose(this->file) == EOF) error("unable to close output stream");
+  if(!this->is_std) {
+    if(fclose(this->file) == EOF) error("unable to close output stream");
+  }
   free(this);
 }
 
@@ -402,7 +420,7 @@ typedef struct comb_t {
       int sl; 
     };
   };
-  int ff;
+  int ref_count;
 } comb_t;
 
 comb_t *comb_new() {
@@ -411,10 +429,15 @@ comb_t *comb_new() {
   return res;
 }
 
+comb_t *comb_share(comb_t *this) {
+  this->ref_count++;
+  return this;
+}
+
 void comb_free(comb_t *this) {
   if(!this) return;
-  if(this->ff) return;
-  this->ff = 1;
+  this->ref_count--;
+  if(this->ref_count > 0) return;
   switch(this->type) {
     case COMB_NONE: break;
     case COMB_JUST:
@@ -787,7 +810,7 @@ comb_t *match_and(comb_t *this, stack_t *stack, node_t *(*fold)(stack_t*)) {
 comb_t *comb_add(comb_t *this, stack_t *stack) {
   if(this->type == COMB_JUST) panic("unable to add to \'JUST\' combinator");
   stack_inverse(&this->stack);
-  for(void *obj = stack_pop(&stack); obj; (obj = stack_pop(&stack))) {
+  for(void *obj = 0; (obj = stack_pop(&stack));) {
     stack_push(&this->stack, obj);
   }
   stack_inverse(&this->stack);
@@ -810,7 +833,7 @@ comb_t *match_opt(comb_t *this, comb_t *elem, comb_t *sep, int sl) {
 
 typedef void (*stack_emit_f)(void*, output_t*);
 void stack_emit(stack_t *this, output_t *out, stack_emit_f emit_f) {
-  for(void *obj = stack_next(&this); (obj = stack_next(&this));) {
+  for(void *obj = 0; (obj = stack_next(&this));) {
     emit_f(obj, out);
   }
 }
@@ -989,7 +1012,9 @@ void var_free(var_t *this) {
 
 void var_emit(var_t *this, output_t *out) {
   type_emit_head(this->type, out);
+  emit(out, " ");
   str_emit(this->id, out);
+  emit(out, " ");
   type_emit_tail(this->type, out);
 }
 
@@ -1021,15 +1046,22 @@ node_t *struct_fold(stack_t *stack) {
 
 void var_member_emit(node_t *this, output_t *out) {
   var_emit(this->node, out);
-  emit(out, ";");
+  emit_line(out, ";");
 }
 
 void struct_emit(struct_t *this, output_t *out) {
-  emit(out, "struct ");
+  emit(out, "typedef struct ");
   str_emit(this->id, out);
-  emit_line(out, "{");
+  emit(out, " ");
+  str_emit(this->id, out);
+  emit_line(out, ";");
+  emit(out, "typedef struct ");
+  str_emit(this->id, out);
+  emit_line(out, " {");
   stack_emit(this->vars, out, (stack_emit_f)var_member_emit);
-  emit(out, "};");
+  emit(out, "} ");
+  str_emit(this->id, out);
+  emit_line(out, ";");
 }
 
 // -- FUNCTION --------------------------
@@ -1090,16 +1122,18 @@ void stm_node_emit(node_t *this, output_t *out) {
 
 void decl_node_emit(node_t *this, output_t *out) {
   decl_emit(this->node, out);
+  emit_line(out, ";");
 }
 
 void fun_emit(fun_t *this, output_t *out) {
   type_emit_head(this->type, out);
+  emit(out, " ");
   str_emit(this->id, out);
   emit(out, "(");
   stack_emit(this->params, out, (stack_emit_f)var_param_emit);
   emit(out, ")");
   type_emit_tail(this->type, out);
-  emit_line(out, "{");
+  emit_line(out, " {");
   stack_emit(this->decls, out, (stack_emit_f)decl_node_emit);
   stack_emit(this->stms, out, (stack_emit_f)stm_node_emit);
   emit_line(out, "}");
@@ -1170,6 +1204,7 @@ void stm_emit(node_t *this, output_t *out) {
       break;
     case EXP_STM_NODE:
       exp_emit(this->node, out);
+      emit_line(out, ";");
       break;
     case LABEL_STM_NODE:
       emitf(out, "%s:\n", ((str_t*)this->node)->val);
@@ -1333,7 +1368,7 @@ void exp_emit(node_t *this, output_t *out) {
 
 // --  ----------------------------------
 
-comb_t *base_comb() {
+comb_t *base_comb(stack_t **comb_stack) {
   comb_t *base_comb        = comb_new();
   comb_t *struct_comb      = comb_new();
   comb_t *fun_comb         = comb_new();
@@ -1347,6 +1382,7 @@ comb_t *base_comb() {
   comb_t *stm_list_comb    = comb_new();
   comb_t *pexp_comb        = comb_new(); // primary expression
   comb_t *exp_comb         = comb_new();
+  
   
   // statements 
   comb_t *exp_stm_comb     = comb_new();
@@ -1390,38 +1426,54 @@ comb_t *base_comb() {
   comb_t *jmp_k    = match_key("jmp", JMP_NODE);
   comb_t *ret_k    = match_key("ret", RET_NODE);
   
-  type_comb       = match_or(type_comb, stack_from(match_id(), u8_k, 0));
-  var_comb        = match_and(var_comb, stack_from(match_id(), colon_o, type_comb, 0), var_fold);
-  var_list_comb   = match_opt(var_list_comb, var_comb, semicolon_o, 1);
-  decl_comb       = match_and(decl_comb, stack_from(var_comb, eq_o, exp_comb, 0), decl_fold);
-  decl_list_comb  = match_opt(decl_list_comb, decl_comb, semicolon_o, 1);
-  param_list_comb = match_opt(param_list_comb, var_comb, comma_o, 0);
-  struct_comb     = match_and(struct_comb, stack_from(match_id(), l_c_b_o, var_list_comb, r_c_b_o, 0), struct_fold);
-  fun_comb        = match_and(fun_comb, stack_from(match_id(), l_r_b_o, param_list_comb, r_r_b_o, arrow_o, type_comb, decl_list_comb, l_c_b_o, stm_list_comb, r_c_b_o, 0), fun_fold);
-  
-  pexp_comb       = match_or(pexp_comb, stack_from(int_exp_comb, id_exp_comb, str_exp_comb, float_exp_comb, cast_exp_comb, sizeof_exp_comb, call_exp_comb, 0));
-  exp_comb        = match_or(exp_comb, stack_from(pexp_comb, dot_exp_comb, arrow_exp_comb, 0));
+  *comb_stack = stack_from(comb_share(base_comb), struct_comb, fun_comb, var_comb, 
+                           var_list_comb, decl_comb, decl_list_comb, param_list_comb, 
+                           type_comb, stm_comb, stm_list_comb, pexp_comb, exp_comb, 
+                           exp_stm_comb, label_stm_comb, jmp_stm_con_comb, jmp_stm_comb, 
+                           ret_stm_comb, int_exp_comb, id_exp_comb, str_exp_comb, 
+                           float_exp_comb, exp_list_comb, call_exp_comb, dot_exp_comb, 
+                           arrow_exp_comb, cast_exp_comb, sizeof_exp_comb, l_c_b_o, 
+                           r_c_b_o, l_r_b_o, r_r_b_o, lt_o, gt_o, dot_o, arrow_o, 
+                           colon_o, semicolon_o, comma_o, eq_o, u8_k, u16_k, sizeof_k, 
+                           jmp_k, ret_k ,0);
 
-  stm_comb        = match_or(stm_comb, stack_from(semicolon_o, exp_stm_comb, label_stm_comb, jmp_stm_comb, jmp_stm_con_comb, ret_stm_comb));
-  stm_list_comb   = match_opt(stm_list_comb, stm_comb, 0, 0);
+#define share comb_share
+  
+  type_comb       = match_or(type_comb, stack_from(match_id(), share(u8_k), 0));
+  var_comb        = match_and(var_comb, stack_from(match_id(), share(colon_o), share(type_comb), 0), var_fold);
+  var_list_comb   = match_opt(var_list_comb, share(var_comb), share(semicolon_o), 1);
+  decl_comb       = match_and(decl_comb, stack_from(share(var_comb), share(eq_o), share(exp_comb), 0), decl_fold);
+  decl_list_comb  = match_opt(decl_list_comb, share(decl_comb), share(semicolon_o), 1);
+  param_list_comb = match_opt(param_list_comb, share(var_comb), share(comma_o), 0);
+  struct_comb     = match_and(struct_comb, stack_from(match_id(), share(l_c_b_o), share(var_list_comb), share(r_c_b_o), 0), struct_fold);
+  fun_comb        = match_and(fun_comb, stack_from(match_id(), share(l_r_b_o), share(param_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), share(decl_list_comb), share(l_c_b_o), share(stm_list_comb), share(r_c_b_o), 0), fun_fold);
+  
+  pexp_comb       = match_or(pexp_comb, stack_from(share(int_exp_comb), share(id_exp_comb), share(str_exp_comb), share(float_exp_comb), share(cast_exp_comb), share(sizeof_exp_comb), share(call_exp_comb), 0));
+  exp_comb        = match_or(exp_comb, stack_from(share(pexp_comb), share(dot_exp_comb), share(arrow_exp_comb), 0));
+
+  stm_comb        = match_or(stm_comb, stack_from(share(semicolon_o), share(exp_stm_comb), share(label_stm_comb), share(jmp_stm_comb), share(jmp_stm_con_comb), share(ret_stm_comb), 0));
+  stm_list_comb   = match_opt(stm_list_comb, share(stm_comb), 0, 0);
   
   // statements
-  exp_stm_comb     = match_and(exp_stm_comb, stack_from(exp_comb, semicolon_o, 0), exp_stm_fold);
-  label_stm_comb   = match_and(label_stm_comb, stack_from(match_id(), colon_o, 0), label_stm_fold);
-  jmp_stm_con_comb = match_and(jmp_stm_con_comb, stack_from(jmp_k, exp_comb, match_id(), semicolon_o, 0), jmp_stm_con_fold);
-  jmp_stm_comb     = match_and(jmp_stm_comb, stack_from(jmp_k, match_id(), semicolon_o, 0), jmp_stm_fold);
-  ret_stm_comb     = match_and(ret_stm_comb, stack_from(ret_k, exp_comb, semicolon_o, 0), ret_stm_fold);
+  exp_stm_comb     = match_and(exp_stm_comb, stack_from(share(exp_comb), share(semicolon_o), 0), exp_stm_fold);
+  label_stm_comb   = match_and(label_stm_comb, stack_from(match_id(), share(colon_o), 0), label_stm_fold);
+  jmp_stm_con_comb = match_and(jmp_stm_con_comb, stack_from(share(jmp_k), share(exp_comb), match_id(), share(semicolon_o), 0), jmp_stm_con_fold);
+  jmp_stm_comb     = match_and(jmp_stm_comb, stack_from(share(jmp_k), match_id(), share(semicolon_o), 0), jmp_stm_fold);
+  ret_stm_comb     = match_and(ret_stm_comb, stack_from(share(ret_k), share(exp_comb), share(semicolon_o), 0), ret_stm_fold);
 
   // expressions
   int_exp_comb     = match_and(int_exp_comb, stack_from(match_int(), 0), int_exp_fold);
   id_exp_comb      = match_and(id_exp_comb, stack_from(match_id(), 0), id_exp_fold);
   str_exp_comb     = match_and(str_exp_comb, stack_from(match_str(), 0), str_exp_fold);
   float_exp_comb   = match_and(float_exp_comb, stack_from(match_float(), 0), float_exp_fold);
-  exp_list_comb    = match_opt(exp_list_comb, exp_comb, 0, 0);
-  call_exp_comb    = match_and(call_exp_comb, stack_from(l_r_b_o, exp_list_comb, r_r_b_o, 0), call_exp_fold);
-  dot_exp_comb     = match_and(dot_exp_comb, stack_from(pexp_comb, dot_o, pexp_comb, 0), dot_exp_fold);
-  arrow_exp_comb   = match_and(arrow_exp_comb, stack_from(pexp_comb, arrow_o, pexp_comb, 0), arrow_exp_fold);
-  cast_exp_comb    = match_and(cast_exp_comb, stack_from(lt_o, type_comb, gt_o, exp_comb, 0), cast_exp_fold);
+  exp_list_comb    = match_opt(exp_list_comb, share(exp_comb), 0, 0);
+  call_exp_comb    = match_and(call_exp_comb, stack_from(share(l_r_b_o), share(exp_list_comb), share(r_r_b_o), 0), call_exp_fold);
+  dot_exp_comb     = match_and(dot_exp_comb, stack_from(share(pexp_comb), share(dot_o), share(pexp_comb), 0), dot_exp_fold);
+  arrow_exp_comb   = match_and(arrow_exp_comb, stack_from(share(pexp_comb), share(arrow_o), share(pexp_comb), 0), arrow_exp_fold);
+  cast_exp_comb    = match_and(cast_exp_comb, stack_from(share(lt_o), share(type_comb), share(gt_o), share(exp_comb), 0), cast_exp_fold);
+  sizeof_exp_comb  = match_and(sizeof_exp_comb, stack_from(share(sizeof_k), share(l_r_b_o), share(exp_comb), share(r_r_b_o), 0), sizeof_exp_fold);
+  
+#undef share
 
   return match_or(base_comb, stack_from(struct_comb, fun_comb, 0));
 }
@@ -1441,9 +1493,9 @@ int main(int argc, char **argv) {
   if(argc < 2) panic("no input file specified");
   FILE *inf = fopen(argv[1], "r");
   if(!inf) panic("unable to open input file");
-  // oupen output file
 
-  FILE *outf = stdout;
+  // open output file
+  FILE *outf = 0;
   if(argc == 3) {
     outf = fopen(argv[2], "w");
     if(!outf) panic("unable to open outpuf file");
@@ -1452,7 +1504,8 @@ int main(int argc, char **argv) {
   input_t  *input  = input_new(inf);
   output_t *output = output_new(outf);
   
-  parser_t *parser = parser_new(input, base_comb());
+  stack_t *comb_stack = 0;
+  parser_t *parser = parser_new(input, base_comb(&comb_stack));
 
   for(node_t *node = 0;;) {
     node = parse(parser);
@@ -1474,13 +1527,12 @@ int main(int argc, char **argv) {
         panic("parsed undefined node");
     }
   }
-
   
   printf("done!\n");
   
   // cleanup
+  stack_free(&comb_stack, comb_free);
   parser_free(parser);
-  input_free(input);
   output_free(output);
   
   return 0;

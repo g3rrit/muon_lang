@@ -4,7 +4,7 @@ foo_t {
  n: u8;
 }
 
-main () -> u8
-bar : u8; {
-  return 0;
+main (l : u8) -> u8
+bar : u8 = 0; {
+  ret 0;
 }
