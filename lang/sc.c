@@ -301,10 +301,6 @@ void node_stack_free(stack_t *this) {
   stack_free(&this, node_free);
 }
 
-node_t *node_stack_fold(stack_t *stack) {
-  return node_new(STACK_NODE, stack, (free_f)node_stack_free);
-}
-
 //---------------------------------------
 // PRIMATIVE_NODE_TYPES
 //---------------------------------------
@@ -409,7 +405,6 @@ typedef struct comb_t {
     // -- OR/AND
     struct {
       stack_t *stack;
-      node_t *(*fold)(stack_t*); // -- AND 
     };
     // -- OPT
     struct {
@@ -419,6 +414,7 @@ typedef struct comb_t {
       // if 1 there also needs to be an element in front of last sep
       int sl; 
     };
+    node_type n_type;
   };
   int ref_count;
 } comb_t;
@@ -482,7 +478,7 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
       stack_push(&stack, res);
     }
     stack_inverse(&stack);
-    res = this->fold(stack);
+    res = node_new(this->n_type, stack, (free_f)node_stack_free);
   } else if(this->type == COMB_OPT) {
     for(;;) {
       if(!(res = comb_parse(input, this->elem, &rc))) {
@@ -503,7 +499,7 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
       }
     }
     stack_inverse(&stack);
-    res = node_new(STACK_NODE, stack, (free_f)node_stack_free);
+    res = node_new(this->n_type, stack, (free_f)node_stack_free);
 
     /*
     if(!(res = comb_parse(input, this->elem, &rc))) {
@@ -800,14 +796,11 @@ comb_t *match_or(comb_t *this, stack_t *stack) {
   return this;
 }
 
-comb_t *match_and(comb_t *this, stack_t *stack, node_t *(*fold)(stack_t*)) {
+comb_t *match_and(comb_t *this, node_type type, stack_t *stack) {
   if(this->type != COMB_NONE) error("combinator already defined");
-  this->type = COMB_AND;
-  this->stack = stack;
-  if(!fold) {
-    fold = node_stack_fold;
-  }
-  this->fold  = fold;
+  this->type   = COMB_AND;
+  this->stack  = stack;
+  this->n_type = type;
   return this;
 }
 
@@ -821,12 +814,13 @@ comb_t *comb_add(comb_t *this, stack_t *stack) {
   return this;
 }
 
-comb_t *match_opt(comb_t *this, comb_t *elem, comb_t *sep, int sl) {
+comb_t *match_opt(comb_t *this, node_type type, comb_t *elem, comb_t *sep, int sl) {
   if(this->type != COMB_NONE) error("combinator already defined");
-  this->type = COMB_OPT;
-  this->elem = elem;
-  this->sep  = sep;
-  this->sl   = sl;
+  this->type   = COMB_OPT;
+  this->elem   = elem;
+  this->sep    = sep;
+  this->sl     = sl;
+  this->n_type = type;
   return this;
 }
 
@@ -842,25 +836,25 @@ void stack_emit(stack_t *this, output_t *out, stack_emit_f emit_f) {
   }
 }
 
-void char_emit(char_t *this, output_t *out) {
-  emitf(out, "%c",  this->val);
+void char_emit(node_t *this, output_t *out) {
+  emitf(out, "%c",  ((char_t*)this->node)->val);
 }
 
-void charl_emit(char_t *this, output_t *out) {
+void charl_emit(node_t *this, output_t *out) {
   emit(out, "'");
   char_emit(this, out);
   emit(out, "'");
 }
 
-void int_emit(int_t *this, output_t *out) {
-  emitf(out, "%d", this->val);
+void int_emit(node_t *this, output_t *out) {
+  emitf(out, "%d", ((int_t*)this->node)->val);
 }
 
-void str_emit(str_t *this, output_t *out) {
-  emit(out, this->val);
+void str_emit(node_t *this, output_t *out) {
+  emit(out, ((str_t*)this->node)->val);
 }
 
-void strl_emit(str_t *this, output_t *out) {
+void strl_emit(node_t *this, output_t *out) {
   emit(out, "\"");
   str_emit(this, out);
   emit(out, "\"");
@@ -870,71 +864,14 @@ void strl_emit(str_t *this, output_t *out) {
 // CUSTOM_NODE_TYPES
 //---------------------------------------
 // -- DECLARATIONS ----------------------
-typedef struct var_t {
-  str_t  *id;
-  node_t *type;
-} var_t;
-typedef struct struct_t {
-  str_t   *id;
-  stack_t *vars;
-} struct_t;
-typedef struct decl_t {
-  var_t  *var;
-  node_t *val;
-} decl_t;
-typedef struct fun_t {
-  str_t   *id;
-  node_t  *type;
-  stack_t *decls;
-  stack_t *params;
-  stack_t *stms;
-} fun_t;
-typedef struct jmp_stm_t {
-  node_t *con; // no condition if 0
-  str_t *label;
-} jmp_stm_t;
-typedef struct bin_exp_t {
-  node_t *lh;
-  node_t *rh;
-} bin_exp_t;
-// --  ----------------------------------
 void type_emit_head(node_t *this, output_t *out);
 void type_emit_tail(node_t *this, output_t *out);
 void type_emit(node_t *this, output_t *out);
-void var_free(var_t *this);
-void var_emit(var_t *this, output_t *out);
-node_t *var_fold(stack_t *stack);
-void struct_free(struct_t *this);
-node_t *struct_fold(stack_t *stack);
-void var_member_emit(node_t *this, output_t *out);
-void struct_emit(struct_t *this, output_t *out);
-void decl_free(decl_t *this);
-void decl_emit(decl_t *this, output_t *out);
-node_t *decl_fold(stack_t *stack);
-void fun_free(fun_t *this);
-node_t *fun_fold(stack_t *stack);
-void var_param_emit(node_t *this, output_t *out);
-void stm_node_emit(node_t *this, output_t *out);
-void decl_node_emit(node_t *this, output_t *out);
-void fun_emit(fun_t *this, output_t *out);
-node_t *exp_stm_fold(stack_t *stack);
-node_t *label_stm_fold(stack_t *stack);
-node_t *jmp_stm_con_fold(stack_t *stack);
-node_t *jmp_stm_fold(stack_t *stack);
-node_t *ret_stm_fold(stack_t *stack);
-void jmp_stm_free(jmp_stm_t *this);
-void jmp_stm_emit(jmp_stm_t *this, output_t *out);
+void var_emit(node_t *this, output_t *out);
+void struct_emit(node_t *this, output_t *out);
+void decl_emit(node_t *this, output_t *out);
+void fun_emit(node_t *this, output_t *out);
 void stm_emit(node_t *this, output_t *out);
-node_t *int_exp_fold(stack_t *stack);
-node_t *id_exp_fold(stack_t *stack);
-node_t *str_exp_fold(stack_t *stack);
-node_t *float_exp_fold(stack_t *stack);
-node_t *dot_exp_fold(stack_t *stack);
-node_t *arrow_exp_fold(stack_t *stack);
-node_t *cast_exp_fold(stack_t *stack);
-node_t *sizeof_exp_fold(stack_t *stack);
-node_t *call_exp_fold(stack_t *stack);
-void bin_exp_free(bin_exp_t *this);
 void exp_emit(node_t *this, output_t *out);
 // --  ----------------------------------
 #define U8_NODE 1
@@ -950,15 +887,27 @@ void exp_emit(node_t *this, output_t *out);
 #define VOID_NODE 11
 #define PTR_NODE 12
 #define DECL_NODE 765
+#define DECL_LIST_NODE 766
 #define STRUCT_NODE 13
 #define VAR_NODE 14
+#define VAR_LIST_NODE 55
+#define PARAM_LIST_NODE 5764
 #define FUN_NODE 66
+
+// TYPES
+#define ID_TYPE_NODE 9001
+#define PTR_TYPE_NODE 9002
+#define FUN_TYPE_NODE 9003
+#define ARR_TYPE_NODE 9004
+#define TYPE_LIST_NODE 9005
 
 // STATEMENTS
 #define EXP_STM_NODE 301
 #define JMP_STM_NODE     303
+#define JMP_CON_STM_NODE 308
 #define LABEL_STM_NODE   304
 #define RET_STM_NODE 305
+#define STM_LIST_NODE 306
 
 // EXPRESSIONS
 #define INT_EXP_NODE 700
@@ -970,6 +919,7 @@ void exp_emit(node_t *this, output_t *out);
 #define ARROW_EXP_NODE 705
 #define CAST_EXP_NODE 706
 #define SIZEOF_EXP_NODE 707
+#define EXP_LIST_NODE 708
 
 #define L_C_B_NODE 50
 #define R_C_B_NODE 51
@@ -985,6 +935,7 @@ void exp_emit(node_t *this, output_t *out);
 #define COLON_NODE 56
 #define SEMICOLON_NODE 57
 #define EQ_NODE  909
+#define AS_NODE  910
 
 #define SIZEOF_NODE 400
 #define JMP_NODE    401
@@ -992,28 +943,48 @@ void exp_emit(node_t *this, output_t *out);
 
 // -- TYPE ------------------------------
 
-// ID_TYPE_NODE: str_t
-// PTR_TYPE_NODE: node_t
-// FUN_TYPE_NODE: stack_t
-// ARR_TYPE_NODE: stack_t
+// ID_TYPE_NODE: 
+//  | STR
+// PTR_TYPE_NODE: 
+//  | *
+//  | TYPE
+// FUN_TYPE_NODE: 
+//  | ( 
+//  | | TYPE
+//  | | ...
+//  | )
+//  | ->
+//  | TYPE
+// ARR_TYPE_NODE: 
+//  | [
+//  | EXP
+//  | ;
+//  | EXP
+//  | ]
 
 void type_emit_head(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
   switch(this->type) {
     case ID_TYPE_NODE:
-      str_emit(this->node, out);
+      str_emit(stack_next(&stack), out);
       break;
-    case PTR_TYPE_NODE:
-      type_emit_head(this->node);
+    case PTR_TYPE_NODE: {
+      stack_next(&stack); // *
+      type_emit_head(stack_next(&stack), out);
       emit(out, "*");
       break;
+    }
     case FUN_TYPE_NODE: {
-      stack_t *stack = this->node;
-      type_emit(stack_next(&this->node), out);
+      stack_next(&stack); // (
+      stack_next(&stack); // stack_t
+      stack_next(&stack); // )
+      stack_next(&stack); // ->
+      type_emit(stack_next(&stack), out);
       emit(out, "(*");
       break;
     }
     case ARR_TYPE_NODE: {
-      stack_t *stack = this->node;
+      stack_next(&stack); // [
       type_emit_head(stack_next(&stack), out);
       break;
     }
@@ -1021,14 +992,17 @@ void type_emit_head(node_t *this, output_t *out) {
 }
 
 void type_emit_tail(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
   switch(this->type) {
     case ID_TYPE_NODE:
     case PTR_TYPE_NODE:
-      type_emit_tail(this->node);
+      stack_next(&stack); // *
+      type_emit_tail(stack_next(&stack), out);
       break;
     case ARR_TYPE_NODE: {
-      stack_t *stack = this->node;
+      stack_next(&stack); // [
       node_t *n = stack_next(&stack);
+      stack_next(&stack); // ;
       emit(out, "[");
       exp_emit(stack_next(&stack), out);
       emit(out, "]");
@@ -1036,8 +1010,8 @@ void type_emit_tail(node_t *this, output_t *out) {
       break;
     }
     case FUN_TYPE_NODE: {
-      stack_t *stack = this->node;
-      stack_next(&stack); // return type already emited
+      stack_next(&stack); // (
+      stack = stack_next(&stack); 
       emit(out, ")(");
       node_t *obj = stack_next(&stack);
       while(obj) {
@@ -1056,218 +1030,168 @@ void type_emit(node_t *this, output_t *out) {
 
 // -- VARIABLE --------------------------
 
-void var_free(var_t *this) {
-  if(!this) return;
-  str_free(this->id);
-  node_free(this->type);
-  free(this);
-}
+// VAR_NODE:
+//  | STR
+//  | :
+//  | TYPE
 
-void var_emit(var_t *this, output_t *out) {
-  type_emit_head(this->type, out);
+void var_emit(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
+  node_t *id_node = stack_next(&stack);
+  stack_next(&stack); // :
+  node_t *type_node = stack_next(&stack);
+  type_emit_head(type_node, out);
   emit(out, " ");
-  str_emit(this->id, out);
+  str_emit(id_node, out);
   emit(out, " ");
-  type_emit_tail(this->type, out);
-}
-
-node_t *var_fold(stack_t *stack) {
-  var_t *res = alloc(sizeof(var_t));
-  res->id = node_unwrap(stack_pop(&stack)); // id
-  node_free(stack_pop(&stack));             // :
-  res->type = stack_pop(&stack);            // type
-  return node_new(VAR_NODE, res, (free_f)var_free);
+  type_emit_tail(type_node, out);
 }
 
 // -- STRUCT ----------------------------
 
-void struct_free(struct_t *this) {
-  if(!this) return;
-  str_free(this->id);
-  stack_free(&this->vars, node_free);
-  free(this);
-}
-
-node_t *struct_fold(stack_t *stack) {
-  struct_t *res = alloc(sizeof(stack_t));
-  res->id = node_unwrap(stack_pop(&stack));      // id
-  node_free(stack_pop(&stack));                  // {
-  res->vars = node_unwrap(stack_pop(&stack));    // vars
-  node_free(stack_pop(&stack));                  // }
-  return node_new(STRUCT_NODE, res, (free_f)struct_free);
-}
+// STRUCT_NODE:
+//  | STR
+//  | {
+//  | | VAR
+//  | | ...
+//  | }
 
 void var_member_emit(node_t *this, output_t *out) {
-  var_emit(this->node, out);
+  var_emit(this, out);
   emit_line(out, ";");
 }
 
-void struct_emit(struct_t *this, output_t *out) {
+void struct_emit(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
+  node_t *id_node = stack_next(&stack);
+  stack_next(&stack);
+  stack_t *var_stack = node_unwrap(stack_next(&stack));
   emit(out, "typedef struct ");
-  str_emit(this->id, out);
+  str_emit(id_node, out);
   emit(out, " ");
-  str_emit(this->id, out);
+  str_emit(id_node, out);
   emit_line(out, ";");
   emit(out, "typedef struct ");
-  str_emit(this->id, out);
+  str_emit(id_node, out);
   emit_line(out, " {");
-  stack_emit(this->vars, out, (stack_emit_f)var_member_emit);
+  stack_emit(var_stack, out, (stack_emit_f)var_member_emit);
   emit(out, "} ");
-  str_emit(this->id, out);
+  str_emit(id_node, out);
   emit_line(out, ";");
 }
 
 // -- FUNCTION --------------------------
 
-void decl_free(decl_t *this) {
-  if(!this) return;
-  var_free(this->var);
-  node_free(this->val);
-  free(this);
-}
+// FUNCTION_NODE:
+//  | STR
+//  | (
+//  | | VAR
+//  | | ...
+//  | )
+//  | ->
+//  | TYPE
+//  | | DECL
+//  | | ...
+//  | {
+//  | | STM
+//  | | ...
+//  | }
 
-void decl_emit(decl_t *this, output_t *out) {
-  var_emit(this->var, out);
+// DECL_NODE:
+//  | VAR
+//  | =
+//  | EXP
+//  | ;
+
+void decl_emit(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
+  node_t *var_node = stack_next(&stack);
+  stack_next(&stack);
+  node_t *exp_node = stack_next(&stack);
+  var_emit(var_node, out);
   emit(out, " = ");
-  exp_emit(this->val, out);
-}
-
-node_t *decl_fold(stack_t *stack) {
-  decl_t *res = alloc(sizeof(decl_t));
-  res->var = node_unwrap(stack_pop(&stack)); // var 
-  node_free(stack_pop(&stack));              // =
-  res->val = stack_pop(&stack);              // val
-  return node_new(DECL_NODE, res, (free_f)decl_free);
-}
-
-void fun_free(fun_t *this) {
-  if(!this) return;
-  str_free(this->id);
-  node_free(this->type);
-  stack_free(&this->decls, node_free);
-  stack_free(&this->params, node_free);
-  stack_free(&this->stms, node_free);
-  free(this);
-}
-
-node_t *fun_fold(stack_t *stack) {
-  fun_t *res = alloc(sizeof(fun_t));
-  res->id = node_unwrap(stack_pop(&stack));        // id
-  node_free(stack_pop(&stack));                    // (
-  res->params = node_unwrap(stack_pop(&stack));    // params
-  node_free(stack_pop(&stack));                    // )
-  node_free(stack_pop(&stack));                    // ->
-  res->type = stack_pop(&stack);                   // type
-  res->decls = node_unwrap(stack_pop(&stack));     // decls
-  node_free(stack_pop(&stack));                    // {
-  res->stms = node_unwrap(stack_pop(&stack));      // stms
-  node_free(stack_pop(&stack));                    // }
-  return node_new(FUN_NODE, res, (free_f)fun_free);
-}
-
-void var_param_emit(node_t *this, output_t *out) {
-  var_emit(this->node, out);
-}
-
-void stm_node_emit(node_t *this, output_t *out) {
-  stm_emit(this, out);
-}
-
-void decl_node_emit(node_t *this, output_t *out) {
-  decl_emit(this->node, out);
+  exp_emit(exp_node, out);
   emit_line(out, ";");
 }
 
-void fun_emit(fun_t *this, output_t *out) {
-  type_emit_head(this->type, out);
+void fun_emit(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
+  node_t *id_node = stack_next(&stack);
+  stack_next(&stack);
+  stack_t *var_stack = node_unwrap(stack_next(&stack));
+  stack_next(&stack);
+  stack_next(&stack);
+  node_t *type_node = stack_next(&stack);
+  stack_t *decl_stack = node_unwrap(stack_next(&stack));
+  stack_next(&stack);
+  stack_t *stm_stack = node_unwrap(stack_next(&stack));
+  type_emit_head(type_node, out);
   emit(out, " ");
-  str_emit(this->id, out);
+  str_emit(id_node, out);
   emit(out, "(");
-  stack_emit(this->params, out, (stack_emit_f)var_param_emit);
+  node_t *var = stack_next(&var_stack);
+  while(var) {
+    var_emit(var, out);
+    var = stack_next(&var_stack);
+    if(var) emit(out, ", ");
+  }
   emit(out, ")");
-  type_emit_tail(this->type, out);
+  type_emit_tail(type_node, out);
   emit_line(out, " {");
-  stack_emit(this->decls, out, (stack_emit_f)decl_node_emit);
-  stack_emit(this->stms, out, (stack_emit_f)stm_node_emit);
+  stack_emit(decl_stack, out, (stack_emit_f)decl_emit);
+  stack_emit(stm_stack, out, (stack_emit_f)stm_emit);
   emit_line(out, "}");
 }
 
 // -- STATEMENT -------------------------
 
-// EXP_STM_NODE: node_t
-// LABEL_STM_NODE: str_t
-// JMP_STM_NODE: jmp_stm_t
-// RET_STM_NODE: node_t
-
-node_t *exp_stm_fold(stack_t *stack) {
-  node_t *res = stack_pop(&stack); // exp
-  node_free(stack_pop(&stack));    // :
-  return node_new(EXP_STM_NODE, res, (free_f)node_free);
-}
-
-node_t *label_stm_fold(stack_t *stack) {
-  str_t *res = node_unwrap(stack_pop(&stack)); // id
-  node_free(stack_pop(&stack));
-  return node_new(LABEL_STM_NODE, res, (free_f)str_free);
-} 
-
-node_t *jmp_stm_con_fold(stack_t *stack) {
-  jmp_stm_t *res = alloc(sizeof(jmp_stm_t));
-  node_free(stack_pop(&stack));                   // jmp
-  res->con = stack_pop(&stack);                   // con
-  res->label = node_unwrap(stack_pop(&stack));    // label
-  node_free(stack_pop(&stack));                   // ;
-  return node_new(JMP_STM_NODE, res, (free_f)jmp_stm_free);
-}
-
-node_t *jmp_stm_fold(stack_t *stack) {
-  jmp_stm_t *res = alloc(sizeof(jmp_stm_t));
-  node_free(stack_pop(&stack));                   // jmp
-  res->con = 0;
-  res->label = node_unwrap(stack_pop(&stack));    // label
-  node_free(stack_pop(&stack));                   // ;
-  return node_new(JMP_STM_NODE, res, (free_f)jmp_stm_free);
-}
-
-node_t *ret_stm_fold(stack_t *stack) {
-  node_free(stack_pop(&stack));        // ret
-  node_t *res = stack_pop(&stack);     // exp
-  node_free(stack_pop(&stack));        // ;
-  return node_new(RET_STM_NODE, res, (free_f)node_free);
-}
-
-void jmp_stm_free(jmp_stm_t *this) {
-  if(!this) return;
-  node_free(this->con);
-  str_free(this->label);
-}
-
-void jmp_stm_emit(jmp_stm_t *this, output_t *out) {
-  emit(out, "if(");
-  if(this->con) exp_emit(this->con, out);
-  else emit(out, "1");
-  emit(out, ") goto ");
-  str_emit(this->label, out);
-  emit_line(out, ";");
-}
+// SEMICOLON_NODE:
+//  ;
+// EXP_STM_NODE: 
+//  | EXP
+//  | ;
+// LABEL_STM_NODE: 
+//  | STR
+//  | :
+// JMP_CON_STM_NODE: 
+//  | jmp
+//  | EXP
+//  | STR
+//  | ;
+// JMP_STM_NODE: 
+//  | jmp
+//  | STR
+//  | ;
+// RET_STM_NODE: 
+//  | ret
+//  | EXP
+//  | ;
 
 void stm_emit(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
   switch(this->type) {
     case SEMICOLON_NODE:
       break;
-    case EXP_STM_NODE:
-      exp_emit(this->node, out);
+    case EXP_STM_NODE: 
+      exp_emit(stack_next(&stack), out);
       emit_line(out, ";");
       break;
     case LABEL_STM_NODE:
-      emitf(out, "%s:\n", ((str_t*)this->node)->val);
+      str_emit(stack_next(&stack), out);
+      emit_line(out, ":");
       break;
-    case JMP_STM_NODE:
-      jmp_stm_emit(this->node, out);
+    case JMP_CON_STM_NODE:
+      emit(out, "if(");
+      stack_next(&stack);
+      exp_emit(stack_next(&stack), out);
+      emit(out, ") goto ");
+      str_emit(stack_next(&stack), out);
+      emit(out, ";");
       break;
     case RET_STM_NODE:
       emit(out, "return ");
-      exp_emit(this->node, out);
+      stack_next(&stack);
+      exp_emit(stack_next(&stack), out);
       emit_line(out, ";");
       break;
   }
@@ -1275,141 +1199,93 @@ void stm_emit(node_t *this, output_t *out) {
 
 // -- EXPRESSION ------------------------
 
-// INT_EXP: int_t
-// ID_EXP: str_t
-// STR_EXP: str_t
-// FLOAT_EXP: float_t
-// DOT_EXP: bin_exp_t
-// ARROW_EXP: bin_exp_t
-// CAST_EXP: bin_exp_t
-// SIZEOF_EXP: type_t
-// CALL_EXP: stack_t
-
-node_t *int_exp_fold(stack_t *stack) {
-  int_t *res = node_unwrap(stack_pop(&stack)); // int
-  return node_new(INT_EXP_NODE, res, (free_f)int_free);
-}
-
-node_t *id_exp_fold(stack_t *stack) {
-  str_t *res = node_unwrap(stack_pop(&stack)); // id
-  return node_new(ID_EXP_NODE, res, (free_f)str_free);
-}
-
-node_t *str_exp_fold(stack_t *stack) {
-  str_t *res = node_unwrap(stack_pop(&stack)); // str
-  return node_new(STR_EXP_NODE, res, (free_f)str_free);
-}
-
-node_t *float_exp_fold(stack_t *stack) {
-  float_t *res = node_unwrap(stack_pop(&stack)); // float
-  return node_new(FLOAT_EXP_NODE, res, (free_f)float_free);
-}
-
-node_t *dot_exp_fold(stack_t *stack) {
-  bin_exp_t *res = alloc(sizeof(bin_exp_t));
-  res->lh = stack_pop(&stack);     // exp
-  node_free(stack_pop(&stack));    // .
-  res->lh = stack_pop(&stack);     // exp
-  return node_new(DOT_EXP_NODE, res, (free_f)bin_exp_free);
-}
-
-node_t *arrow_exp_fold(stack_t *stack) {
-  bin_exp_t *res = alloc(sizeof(bin_exp_t));
-  res->lh = stack_pop(&stack);     // exp
-  node_free(stack_pop(&stack));    // ->
-  res->lh = stack_pop(&stack);     // exp
-  return node_new(ARROW_EXP_NODE, res, (free_f)bin_exp_free);
-}
-
-node_t *cast_exp_fold(stack_t *stack) {
-  bin_exp_t *res = alloc(sizeof(bin_exp_t));
-  node_free(stack_pop(&stack));       // <
-  res->lh = stack_pop(&stack);        // type
-  node_free(stack_pop(&stack));       // >
-  res->rh = stack_pop(&stack);        // exp
-  return node_new(CAST_EXP_NODE, res, (free_f)bin_exp_free);
-}
-
-node_t *sizeof_exp_fold(stack_t *stack) {
-  node_free(stack_pop(&stack));    // sizeof
-  node_free(stack_pop(&stack));    // (
-  node_t *res = stack_pop(&stack); // type
-  node_free(stack_pop(&stack));    // )
-  return node_new(SIZEOF_EXP_NODE, res, (free_f)bin_exp_free);
-}
-
-node_t *call_exp_fold(stack_t *stack) {
-  node_free(stack_pop(&stack));                  // (
-  stack_t *res = node_unwrap(stack_pop(&stack)); // exp exp ...
-  node_free(stack_pop(&stack));
-  return node_new(CALL_EXP_NODE, res, (free_f)node_stack_free);
-}
-
-void bin_exp_free(bin_exp_t *this) {
-  if(!this) return;
-  node_free(this->lh);
-  node_free(this->rh);
-  free(this);
-}
+// INT_EXP: 
+//  | INT
+// ID_EXP: 
+//  | STR
+// STR_EXP: 
+//  | STR
+// FLOAT_EXP: 
+//  | FLOAT
+// DOT_EXP: 
+//  | EXP
+//  | .
+//  | EXP
+// ARROW_EXP: 
+//  | EXP
+//  | ->
+//  | EXP
+// CAST_EXP: 
+//  | <
+//  | TYPE
+//  | >
+//  | EXP
+// SIZEOF_EXP: 
+//  | sizeof
+//  | EXP
+// CALL_EXP: 
+//  | (
+//  | | EXP
+//  | | ...
+//  | )
 
 void exp_emit(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
   emit(out, "(");
   switch(this->type) {
     case INT_EXP_NODE:
-      int_emit(this->node, out);
+      int_emit(stack_next(&stack), out);
       break;
     case ID_EXP_NODE:
-      str_emit(this->node, out);
+      str_emit(stack_next(&stack), out);
       break;
     case STR_EXP_NODE:
-      emit(out, "\"");
-      str_emit(this->node, out);
-      emit(out, "\"");
+      strl_emit(stack_next(&stack), out);
       break;
     case FLOAT_EXP_NODE:
-      float_emit(this->node, out);
+      float_emit(stack_next(&stack), out);
       break;
-    case DOT_EXP_NODE: {
-      bin_exp_t *exp = this->node;
-      exp_emit(exp->lh, out);
+    case DOT_EXP_NODE:
+      exp_emit(stack_next(&stack), out);
+      stack_next(&stack);
       emit(out, ".");
-      exp_emit(exp->rh, out);
+      exp_emit(stack_next(&stack), out);
       break;
-    }
-    case ARROW_EXP_NODE: {
-      bin_exp_t *exp = this->node;
-      exp_emit(exp->lh, out);
+    case ARROW_EXP_NODE:
+      exp_emit(stack_next(&stack), out);
+      stack_next(&stack);
       emit(out, "->");
-      exp_emit(exp->rh, out);
+      exp_emit(stack_next(&stack), out);
       break;
-    }
-    case CAST_EXP_NODE: {
-      bin_exp_t *exp = this->node;
+    case CAST_EXP_NODE:
       emit(out, "(");
-      type_emit(exp->lh, out);
+      stack_next(&stack);
+      type_emit(stack_next(&stack), out);
+      stack_next(&stack);
       emit(out, ")(");
-      exp_emit(exp->rh, out);
+      exp_emit(stack_next(&stack), out);
       emit(out, ")");
       break;
-    }
     case SIZEOF_EXP_NODE:
       emit(out, "sizeof(");
-      type_emit(this->node, out);
+      stack_next(&stack);
+      type_emit(stack_next(&stack), out);
       emit(out, ")");
       break;
     case CALL_EXP_NODE: {
-      stack_t *stack = this->node;
-      node_t *exp = stack_next(&stack);
+      stack_next(&stack);
+      stack_t *exp_stack = node_unwrap(stack_next(&stack));
+      node_t *exp = stack_next(&exp_stack);
       if(!exp) {
         error("invalid function call exp");
         break;
       }
       exp_emit(exp, out);
       emit(out, "(");
-      exp = stack_next(&stack);
+      exp = stack_next(&exp_stack);
       while(exp) {
         exp_emit(exp, out);
-        exp = stack_next(&stack);
+        exp = stack_next(&exp_stack);
         if(exp) emit(out, ", ");
       }
       emit(out, ")");
@@ -1436,11 +1312,17 @@ parser_t *parser_create(input_t *input) {
   comb_t *pexp_comb        = comb_new(); // primary expression
   comb_t *exp_comb         = comb_new();
   
+  // types
+  comb_t *id_type_comb     = comb_new();
+  comb_t *ptr_type_comb    = comb_new();
+  comb_t *fun_type_comb    = comb_new();
+  comb_t *arr_type_comb    = comb_new();
+  comb_t *type_list_comb   = comb_new();
   
   // statements 
   comb_t *exp_stm_comb     = comb_new();
   comb_t *label_stm_comb   = comb_new();
-  comb_t *jmp_stm_con_comb = comb_new();
+  comb_t *jmp_con_stm_comb = comb_new();
   comb_t *jmp_stm_comb     = comb_new();
   comb_t *ret_stm_comb     = comb_new();
   
@@ -1471,6 +1353,7 @@ parser_t *parser_create(input_t *input) {
   comb_t *semicolon_o = match_op(";", SEMICOLON_NODE);
   comb_t *comma_o     = match_op(",", COMMA_NODE);
   comb_t *eq_o        = match_op("=", EQ_NODE);
+  comb_t *as_o        = match_op("*", AS_NODE);
   
   // keywords
   comb_t *u8_k     = match_key("u8", U8_NODE);
@@ -1482,7 +1365,8 @@ parser_t *parser_create(input_t *input) {
   stack_t *comb_stack = stack_from(base_comb, struct_comb, fun_comb, var_comb, 
                            var_list_comb, decl_comb, decl_list_comb, param_list_comb, 
                            type_comb, stm_comb, stm_list_comb, pexp_comb, exp_comb, 
-                           exp_stm_comb, label_stm_comb, jmp_stm_con_comb, jmp_stm_comb, 
+                           id_type_comb, ptr_type_comb, fun_type_comb, arr_type_comb,
+                           exp_stm_comb, label_stm_comb, jmp_con_stm_comb, jmp_stm_comb, 
                            ret_stm_comb, int_exp_comb, id_exp_comb, str_exp_comb, 
                            float_exp_comb, exp_list_comb, call_exp_comb, dot_exp_comb, 
                            arrow_exp_comb, cast_exp_comb, sizeof_exp_comb, l_c_b_o, 
@@ -1492,39 +1376,46 @@ parser_t *parser_create(input_t *input) {
 
 #define share comb_share
   
+  // types
+  type_list_comb  = match_opt(type_list_comb, TYPE_LIST_NODE, share(type_comb), share(comma_o), 0);
+  id_type_comb    = match_and(id_type_comb, ID_TYPE_NODE, stack_from(match_id(), 0)); 
+  ptr_type_comb   = match_and(ptr_type_comb, PTR_TYPE_NODE, stack_from(share(as_o), share(type_comb), 0));
+  fun_type_comb   = match_and(fun_type_comb, FUN_TYPE_NODE, stack_from(share(l_r_b_o), share(type_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), 0));
+  arr_type_comb   = match_and(arr_type_comb, ARR_TYPE_NODE, stack_from(share(l_s_b_o), share(type_comb), share(semicolon_o), share(exp_comb), share(r_s_b_o), 0));
   type_comb       = match_or(type_comb, stack_from(match_id(), share(u8_k), 0));
-  var_comb        = match_and(var_comb, stack_from(match_id(), share(colon_o), share(type_comb), 0), var_fold);
-  var_list_comb   = match_opt(var_list_comb, share(var_comb), share(semicolon_o), 1);
-  decl_comb       = match_and(decl_comb, stack_from(share(var_comb), share(eq_o), share(exp_comb), 0), decl_fold);
-  decl_list_comb  = match_opt(decl_list_comb, share(decl_comb), share(semicolon_o), 1);
-  param_list_comb = match_opt(param_list_comb, share(var_comb), share(comma_o), 0);
-  struct_comb     = match_and(struct_comb, stack_from(match_id(), share(l_c_b_o), share(var_list_comb), share(r_c_b_o), 0), struct_fold);
-  fun_comb        = match_and(fun_comb, stack_from(match_id(), share(l_r_b_o), share(param_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), share(decl_list_comb), share(l_c_b_o), share(stm_list_comb), share(r_c_b_o), 0), fun_fold);
+
+  var_comb        = match_and(var_comb, VAR_NODE, stack_from(match_id(), share(colon_o), share(type_comb), 0));
+  var_list_comb   = match_opt(var_list_comb, VAR_LIST_NODE, share(var_comb), share(semicolon_o), 1);
+  decl_comb       = match_and(decl_comb, DECL_NODE, stack_from(share(var_comb), share(eq_o), share(exp_comb), 0));
+  decl_list_comb  = match_opt(decl_list_comb, DECL_LIST_NODE, share(decl_comb), share(semicolon_o), 1);
+  param_list_comb = match_opt(param_list_comb, PARAM_LIST_NODE, share(var_comb), share(comma_o), 0);
+  struct_comb     = match_and(struct_comb, STRUCT_NODE, stack_from(match_id(), share(l_c_b_o), share(var_list_comb), share(r_c_b_o), 0));
+  fun_comb        = match_and(fun_comb, FUN_NODE, stack_from(match_id(), share(l_r_b_o), share(param_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), share(decl_list_comb), share(l_c_b_o), share(stm_list_comb), share(r_c_b_o), 0));
   
   pexp_comb       = match_or(pexp_comb, stack_from(share(int_exp_comb), share(id_exp_comb), share(str_exp_comb), share(float_exp_comb), share(cast_exp_comb), share(sizeof_exp_comb), share(call_exp_comb), 0));
   exp_comb        = match_or(exp_comb, stack_from(share(pexp_comb), share(dot_exp_comb), share(arrow_exp_comb), 0));
 
-  stm_comb        = match_or(stm_comb, stack_from(share(semicolon_o), share(exp_stm_comb), share(label_stm_comb), share(jmp_stm_comb), share(jmp_stm_con_comb), share(ret_stm_comb), 0));
-  stm_list_comb   = match_opt(stm_list_comb, share(stm_comb), 0, 0);
+  stm_comb        = match_or(stm_comb, stack_from(share(semicolon_o), share(exp_stm_comb), share(label_stm_comb), share(jmp_stm_comb), share(jmp_con_stm_comb), share(ret_stm_comb), 0));
+  stm_list_comb   = match_opt(stm_list_comb, STM_LIST_NODE, share(stm_comb), 0, 0);
   
   // statements
-  exp_stm_comb     = match_and(exp_stm_comb, stack_from(share(exp_comb), share(semicolon_o), 0), exp_stm_fold);
-  label_stm_comb   = match_and(label_stm_comb, stack_from(match_id(), share(colon_o), 0), label_stm_fold);
-  jmp_stm_con_comb = match_and(jmp_stm_con_comb, stack_from(share(jmp_k), share(exp_comb), match_id(), share(semicolon_o), 0), jmp_stm_con_fold);
-  jmp_stm_comb     = match_and(jmp_stm_comb, stack_from(share(jmp_k), match_id(), share(semicolon_o), 0), jmp_stm_fold);
-  ret_stm_comb     = match_and(ret_stm_comb, stack_from(share(ret_k), share(exp_comb), share(semicolon_o), 0), ret_stm_fold);
+  exp_stm_comb     = match_and(exp_stm_comb, EXP_STM_NODE, stack_from(share(exp_comb), share(semicolon_o), 0));
+  label_stm_comb   = match_and(label_stm_comb, LABEL_STM_NODE, stack_from(match_id(), share(colon_o), 0));
+  jmp_con_stm_comb = match_and(jmp_con_stm_comb, JMP_CON_STM_NODE, stack_from(share(jmp_k), share(exp_comb), match_id(), share(semicolon_o), 0));
+  jmp_stm_comb     = match_and(jmp_stm_comb, JMP_STM_NODE, stack_from(share(jmp_k), match_id(), share(semicolon_o), 0));
+  ret_stm_comb     = match_and(ret_stm_comb, RET_STM_NODE, stack_from(share(ret_k), share(exp_comb), share(semicolon_o), 0));
 
   // expressions
-  int_exp_comb     = match_and(int_exp_comb, stack_from(match_int(), 0), int_exp_fold);
-  id_exp_comb      = match_and(id_exp_comb, stack_from(match_id(), 0), id_exp_fold);
-  str_exp_comb     = match_and(str_exp_comb, stack_from(match_str(), 0), str_exp_fold);
-  float_exp_comb   = match_and(float_exp_comb, stack_from(match_float(), 0), float_exp_fold);
-  exp_list_comb    = match_opt(exp_list_comb, share(exp_comb), 0, 0);
-  call_exp_comb    = match_and(call_exp_comb, stack_from(share(l_r_b_o), share(exp_list_comb), share(r_r_b_o), 0), call_exp_fold);
-  dot_exp_comb     = match_and(dot_exp_comb, stack_from(share(pexp_comb), share(dot_o), share(pexp_comb), 0), dot_exp_fold);
-  arrow_exp_comb   = match_and(arrow_exp_comb, stack_from(share(pexp_comb), share(arrow_o), share(pexp_comb), 0), arrow_exp_fold);
-  cast_exp_comb    = match_and(cast_exp_comb, stack_from(share(lt_o), share(type_comb), share(gt_o), share(exp_comb), 0), cast_exp_fold);
-  sizeof_exp_comb  = match_and(sizeof_exp_comb, stack_from(share(sizeof_k), share(l_r_b_o), share(exp_comb), share(r_r_b_o), 0), sizeof_exp_fold);
+  int_exp_comb     = match_and(int_exp_comb, INT_EXP_NODE, stack_from(match_int(), 0));
+  id_exp_comb      = match_and(id_exp_comb, ID_EXP_NODE, stack_from(match_id(), 0));
+  str_exp_comb     = match_and(str_exp_comb, STR_EXP_NODE, stack_from(match_str(), 0));
+  float_exp_comb   = match_and(float_exp_comb, FLOAT_EXP_NODE, stack_from(match_float(), 0));
+  exp_list_comb    = match_opt(exp_list_comb, EXP_LIST_NODE, share(exp_comb), 0, 0);
+  call_exp_comb    = match_and(call_exp_comb, CALL_EXP_NODE, stack_from(share(l_r_b_o), share(exp_list_comb), share(r_r_b_o), 0));
+  dot_exp_comb     = match_and(dot_exp_comb, DOT_EXP_NODE, stack_from(share(pexp_comb), share(dot_o), share(pexp_comb), 0));
+  arrow_exp_comb   = match_and(arrow_exp_comb, ARROW_EXP_NODE, stack_from(share(pexp_comb), share(arrow_o), share(pexp_comb), 0));
+  cast_exp_comb    = match_and(cast_exp_comb, CAST_EXP_NODE, stack_from(share(lt_o), share(type_comb), share(gt_o), share(exp_comb), 0));
+  sizeof_exp_comb  = match_and(sizeof_exp_comb, SIZEOF_EXP_NODE, stack_from(share(sizeof_k), share(type_comb), 0));
   
 #undef share
   
@@ -1566,15 +1457,13 @@ int main(int argc, char **argv) {
     if(!node) break;
     switch(node->type) {
       case STRUCT_NODE: {
-        struct_t *s = node->node;
-        log("parsed struct: %s", s->id->val);
-        struct_emit(s, output);
+        log("parsed struct");
+        struct_emit(node, output);
         break;
       }
       case FUN_NODE: {
-        fun_t *f = node->node;
-        log("parse function: %s", f->id->val);
-        fun_emit(f, output);
+        log("parse function");
+        fun_emit(node, output);
         break;
       }
       default:
