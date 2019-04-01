@@ -885,8 +885,6 @@ void exp_emit(node_t *this, output_t *out);
 #define FLOAT_EXP_NODE 702
 #define STR_EXP_NODE 709
 #define CALL_EXP_NODE 703
-#define DOT_EXP_NODE 704
-#define ARROW_EXP_NODE 705
 #define CAST_EXP_NODE 706
 #define SIZEOF_EXP_NODE 707
 #define EXP_LIST_NODE 708
@@ -1179,14 +1177,6 @@ void stm_emit(node_t *this, output_t *out) {
 //  | STR
 // FLOAT_EXP: 
 //  | FLOAT
-// DOT_EXP: 
-//  | EXP
-//  | .
-//  | EXP
-// ARROW_EXP: 
-//  | EXP
-//  | ->
-//  | EXP
 // CAST_EXP: 
 //  | <
 //  | TYPE
@@ -1203,7 +1193,6 @@ void stm_emit(node_t *this, output_t *out) {
 
 void exp_emit(node_t *this, output_t *out) {
   stack_t *stack = this->node;
-  emit(out, "(");
   switch(this->type) {
     case INT_EXP_NODE:
       int_emit(stack_next(&stack), out);
@@ -1216,18 +1205,6 @@ void exp_emit(node_t *this, output_t *out) {
       break;
     case FLOAT_EXP_NODE:
       float_emit(stack_next(&stack), out);
-      break;
-    case DOT_EXP_NODE:
-      exp_emit(stack_next(&stack), out);
-      stack_next(&stack);
-      emit(out, ".");
-      exp_emit(stack_next(&stack), out);
-      break;
-    case ARROW_EXP_NODE:
-      exp_emit(stack_next(&stack), out);
-      stack_next(&stack);
-      emit(out, "->");
-      exp_emit(stack_next(&stack), out);
       break;
     case CAST_EXP_NODE:
       emit(out, "(");
@@ -1264,7 +1241,6 @@ void exp_emit(node_t *this, output_t *out) {
       break;       
     }
   }
-  emit(out, ")");
 }
 
 // --  ----------------------------------
@@ -1281,7 +1257,6 @@ parser_t *parser_create(input_t *input) {
   comb_t *type_comb        = comb_new();
   comb_t *stm_comb         = comb_new();
   comb_t *stm_list_comb    = comb_new();
-  comb_t *pexp_comb        = comb_new(); // primary expression
   comb_t *exp_comb         = comb_new();
   
   // types
@@ -1336,7 +1311,7 @@ parser_t *parser_create(input_t *input) {
   
   stack_t *comb_stack = stack_from(base_comb, struct_comb, fun_comb, var_comb, 
                            var_list_comb, decl_comb, decl_list_comb, param_list_comb, 
-                           type_comb, stm_comb, stm_list_comb, pexp_comb, exp_comb, 
+                           type_comb, stm_comb, stm_list_comb, exp_comb, 
                            id_type_comb, ptr_type_comb, fun_type_comb, arr_type_comb,
                            exp_stm_comb, label_stm_comb, jmp_con_stm_comb, jmp_stm_comb, 
                            ret_stm_comb, int_exp_comb, id_exp_comb, str_exp_comb, 
@@ -1364,8 +1339,7 @@ parser_t *parser_create(input_t *input) {
   struct_comb     = match_and(struct_comb, STRUCT_NODE, stack_from(match_id(), share(l_c_b_o), share(var_list_comb), share(r_c_b_o), 0));
   fun_comb        = match_and(fun_comb, FUN_NODE, stack_from(match_id(), share(l_r_b_o), share(param_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), share(decl_list_comb), share(l_c_b_o), share(stm_list_comb), share(r_c_b_o), 0));
   
-  pexp_comb       = match_or(pexp_comb, stack_from(share(int_exp_comb), share(id_exp_comb), share(str_exp_comb), share(float_exp_comb), share(cast_exp_comb), share(sizeof_exp_comb), share(call_exp_comb), 0));
-  exp_comb        = match_or(exp_comb, stack_from(share(dot_exp_comb), share(arrow_exp_comb), share(pexp_comb), 0));
+  exp_comb       = match_or(exp_comb, stack_from(share(int_exp_comb), share(id_exp_comb), share(str_exp_comb), share(float_exp_comb), share(cast_exp_comb), share(sizeof_exp_comb), share(call_exp_comb), 0));
 
   stm_comb        = match_or(stm_comb, stack_from(share(semicolon_o), share(exp_stm_comb), share(label_stm_comb), share(jmp_stm_comb), share(jmp_con_stm_comb), share(ret_stm_comb), 0));
   stm_list_comb   = match_opt(stm_list_comb, STM_LIST_NODE, share(stm_comb), 0, 0);
@@ -1384,8 +1358,6 @@ parser_t *parser_create(input_t *input) {
   float_exp_comb   = match_and(float_exp_comb, FLOAT_EXP_NODE, stack_from(match_float(), 0));
   exp_list_comb    = match_opt(exp_list_comb, EXP_LIST_NODE, share(exp_comb), 0, 0);
   call_exp_comb    = match_and(call_exp_comb, CALL_EXP_NODE, stack_from(share(l_r_b_o), share(exp_list_comb), share(r_r_b_o), 0));
-  dot_exp_comb     = match_and(dot_exp_comb, DOT_EXP_NODE, stack_from(share(pexp_comb), share(dot_o), share(pexp_comb), 0));
-  arrow_exp_comb   = match_and(arrow_exp_comb, ARROW_EXP_NODE, stack_from(share(pexp_comb), share(arrow_o), share(pexp_comb), 0));
   cast_exp_comb    = match_and(cast_exp_comb, CAST_EXP_NODE, stack_from(share(lt_o), share(type_comb), share(gt_o), share(exp_comb), 0));
   sizeof_exp_comb  = match_and(sizeof_exp_comb, SIZEOF_EXP_NODE, stack_from(share(sizeof_k), share(type_comb), 0));
   
@@ -1403,10 +1375,12 @@ parser_t *parser_create(input_t *input) {
 // FILE_PREFIX 
 //---------------------------------------
 
-const char *file_prefix =        "\
-#define set(var, val) var = val \n\
-#define ref(var) &var           \n\
-#define deref(var) *var         \n\
+const char *file_prefix =            "\
+#define set(var, val) var = val     \n\
+#define ref(var) &var               \n\
+#define deref(var) *var             \n\
+#define get(var1, var2) var1.var2   \n\
+#define pget(var1, var2) var1->var2 \n\
 ";
 
 //---------------------------------------
