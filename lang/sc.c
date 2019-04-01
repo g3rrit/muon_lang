@@ -414,14 +414,15 @@ typedef struct comb_t {
       // if 1 there also needs to be an element in front of last sep
       int sl; 
     };
-    node_type n_type;
   };
+  node_type n_type;
   int ref_count;
 } comb_t;
 
 comb_t *comb_new() {
   comb_t *res = alloc(sizeof(comb_t));
   memset(res, 0, sizeof(comb_t));
+  res->ref_count = 1;
   return res;
 }
 
@@ -500,37 +501,6 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
     }
     stack_inverse(&stack);
     res = node_new(this->n_type, stack, (free_f)node_stack_free);
-
-    /*
-    if(!(res = comb_parse(input, this->elem, &rc))) {
-      input_rewind(input, rc); // prob not necessary
-      rc = 0;
-    } else {
-      stack_push(&stack, res);
-      if(this->sep) {
-        while(comb_parse(input, this->sep, &rc)) {
-          if(!(res = comb_parse(input, this->elem, &rc))) {
-            stack_free(&stack, node_free);
-            input_rewind(input, rc);
-            rc = 0;
-            break;
-          }
-          stack_push(&stack, res);
-        }
-      } else {
-        while((res = comb_parse(input, this->elem, &rc))) {
-          stack_push(&stack, res);
-        }
-      }
-      if(this->sl && !comb_parse(input, this->sep, &rc)) {
-        stack_free(&stack, node_free);
-        input_rewind(input, rc);
-        rc = 0;
-      }
-      stack_inverse(&stack);
-      res = node_new(STACK_NODE, stack, (free_f)node_stack_free);
-    }
-    */
   } else {
     panic("undefined parser combinator");
   }
@@ -995,6 +965,7 @@ void type_emit_tail(node_t *this, output_t *out) {
   stack_t *stack = this->node;
   switch(this->type) {
     case ID_TYPE_NODE:
+      break;
     case PTR_TYPE_NODE:
       stack_next(&stack); // *
       type_emit_tail(stack_next(&stack), out);
@@ -1011,7 +982,7 @@ void type_emit_tail(node_t *this, output_t *out) {
     }
     case FUN_TYPE_NODE: {
       stack_next(&stack); // (
-      stack = stack_next(&stack); 
+      stack = node_unwrap(stack_next(&stack)); 
       emit(out, ")(");
       node_t *obj = stack_next(&stack);
       while(obj) {
@@ -1019,6 +990,7 @@ void type_emit_tail(node_t *this, output_t *out) {
         if((obj = stack_next(&stack))) emit(out, ", ");
       }
       emit(out, ")");
+      break;
     }
   }
 }
@@ -1382,7 +1354,7 @@ parser_t *parser_create(input_t *input) {
   ptr_type_comb   = match_and(ptr_type_comb, PTR_TYPE_NODE, stack_from(share(as_o), share(type_comb), 0));
   fun_type_comb   = match_and(fun_type_comb, FUN_TYPE_NODE, stack_from(share(l_r_b_o), share(type_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), 0));
   arr_type_comb   = match_and(arr_type_comb, ARR_TYPE_NODE, stack_from(share(l_s_b_o), share(type_comb), share(semicolon_o), share(exp_comb), share(r_s_b_o), 0));
-  type_comb       = match_or(type_comb, stack_from(match_id(), share(u8_k), 0));
+  type_comb       = match_or(type_comb, stack_from(share(arr_type_comb), share(fun_type_comb), share(ptr_type_comb), share(id_type_comb), 0));
 
   var_comb        = match_and(var_comb, VAR_NODE, stack_from(match_id(), share(colon_o), share(type_comb), 0));
   var_list_comb   = match_opt(var_list_comb, VAR_LIST_NODE, share(var_comb), share(semicolon_o), 1);
@@ -1393,7 +1365,7 @@ parser_t *parser_create(input_t *input) {
   fun_comb        = match_and(fun_comb, FUN_NODE, stack_from(match_id(), share(l_r_b_o), share(param_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), share(decl_list_comb), share(l_c_b_o), share(stm_list_comb), share(r_c_b_o), 0));
   
   pexp_comb       = match_or(pexp_comb, stack_from(share(int_exp_comb), share(id_exp_comb), share(str_exp_comb), share(float_exp_comb), share(cast_exp_comb), share(sizeof_exp_comb), share(call_exp_comb), 0));
-  exp_comb        = match_or(exp_comb, stack_from(share(pexp_comb), share(dot_exp_comb), share(arrow_exp_comb), 0));
+  exp_comb        = match_or(exp_comb, stack_from(share(dot_exp_comb), share(arrow_exp_comb), share(pexp_comb), 0));
 
   stm_comb        = match_or(stm_comb, stack_from(share(semicolon_o), share(exp_stm_comb), share(label_stm_comb), share(jmp_stm_comb), share(jmp_con_stm_comb), share(ret_stm_comb), 0));
   stm_list_comb   = match_opt(stm_list_comb, STM_LIST_NODE, share(stm_comb), 0, 0);
@@ -1427,6 +1399,19 @@ parser_t *parser_create(input_t *input) {
 //---------------------------------------
 //---------------------------------------
 
+//---------------------------------------
+// FILE_PREFIX 
+//---------------------------------------
+
+const char *file_prefix =        "\
+#define set(var, val) var = val \n\
+#define ref(var) &var           \n\
+#define deref(var) *var         \n\
+";
+
+//---------------------------------------
+//---------------------------------------
+
 
 int main(int argc, char **argv) {
   printf("+---------------------------+\n");
@@ -1451,6 +1436,9 @@ int main(int argc, char **argv) {
   output_t *output = output_new(outf);
   
   parser_t *parser = parser_create(input);
+  
+  // print prefix
+  emitf(output, "%s\n", file_prefix);
 
   for(node_t *node = 0;;) {
     node = parse(parser);
