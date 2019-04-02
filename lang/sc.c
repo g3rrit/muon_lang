@@ -489,6 +489,7 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
   } else if(this->type == COMB_AND) {
     while((comb_elem = stack_next(&in_stack))) {
       if(!(res = comb_parse(input, comb_elem, &rc))) {
+        stack_free(&stack, node_free); 
         input_rewind(input, rc);
         rc = 0;
         return 0;
@@ -1569,7 +1570,7 @@ int main(int argc, char **argv) {
       default:
         panic("parsed undefined node");
     }
-    node_free(node);
+    //node_free(node); //TODO
   }
 
 cleanup:  
