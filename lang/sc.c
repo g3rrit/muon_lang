@@ -21,6 +21,7 @@ typedef long unsigned int ulong;
 #define STR_NODE   -4
 #define CHAR_NODE  -5
 #define STACK_NODE -6
+#define EOF_NODE   -7
 
 typedef int node_type;
 typedef void (*free_f)(void*);
@@ -164,8 +165,10 @@ void input_free(input_t *this) {
   free(this);
 }
 
+#define print_char(c) (c >= 32 && c <= 126 ? printf("n[%c]\n", c) : printf("n[-]\n"));
 char input_next(input_t *this) {
   int c = fgetc(this->file); 
+  //print_char(c);
   if(c == EOF) {
     log("end of file");
     return (char)0;
@@ -174,6 +177,7 @@ char input_next(input_t *this) {
 }
 
 void input_rewind(input_t *this, ulong n) {
+  //printf("r[%d]", n);
   if(fseek(this->file, (long int)-n, SEEK_CUR)) {
     panic("unable to rewind %lu chars", n);
   }
@@ -181,7 +185,7 @@ void input_rewind(input_t *this, ulong n) {
 
 char input_peek(input_t *this) {
   char c = input_next(this);
-  if(c) input_rewind(this, 1);
+  input_rewind(this, 1);
   return c;
 }
 
@@ -191,9 +195,8 @@ int input_skip(input_t *this, char *set) {
   do {
     c = input_next(this);
     count++;
-    if(!c) return count;
-  } while(strchr(set, c));
-  input_rewind(this, 1);
+  } while(strchr(set, c) && c);
+  if(c) input_rewind(this, 1);
   return count;
 }
 
@@ -388,7 +391,8 @@ typedef enum comb_e {
  COMB_JUST,
  COMB_OR,
  COMB_AND,
- COMB_OPT
+ COMB_OPT,
+ COMB_EXPECT
 } comb_e;
 
 typedef node_t*(*parse_f)(void*, input_t*, ulong*);
@@ -414,6 +418,11 @@ typedef struct comb_t {
       // if 1 there also needs to be an element in front of last sep
       int sl; 
     };
+    // -- EXPECT
+    struct {
+      struct comb_t *exp;
+      char *desc;
+    };
   };
   node_type n_type;
   int ref_count;
@@ -424,6 +433,11 @@ comb_t *comb_new() {
   memset(res, 0, sizeof(comb_t));
   res->ref_count = 1;
   return res;
+}
+
+void comb_error(comb_t *this, input_t *input) {
+  fprintf(stdout, "|PARSER ERROR| Expected: %s\n", this->desc);
+  exit(-1);
 }
 
 comb_t *comb_share(comb_t *this) {
@@ -447,6 +461,9 @@ void comb_free(comb_t *this) {
     case COMB_OPT:
       comb_free(this->elem);
       comb_free(this->sep);
+      break;
+    case COMB_EXPECT:
+      comb_free(this->exp);
       break;
   }
   free(this);
@@ -501,6 +518,11 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
     }
     stack_inverse(&stack);
     res = node_new(this->n_type, stack, (free_f)node_stack_free);
+  } else if(this->type == COMB_EXPECT) {
+    res = comb_parse(input, this->exp, &rc);
+    if(!res) {
+      comb_error(this, input);
+    }
   } else {
     panic("undefined parser combinator");
   }
@@ -534,7 +556,7 @@ void parser_free(parser_t *this) {
   free(this);
 }
 
-#define input_move() (rc++, input_next(input))
+#define input_move() ((cc = input_next(input)) ? (rc++, cc) : cc) //(rc++, input_next(input))
 
 #define input_fail() {     \
   input_rewind(input, rc); \
@@ -545,6 +567,7 @@ void parser_free(parser_t *this) {
 
 node_t *parse_id(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
+  char cc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   
   rc += input_skip(input, IGNORE_SET);
@@ -566,6 +589,7 @@ node_t *parse_id(void *env, input_t *input, ulong *rcr) {
 
 node_t *parse_int(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
+  char cc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   
   rc += input_skip(input, IGNORE_SET);
@@ -586,6 +610,7 @@ node_t *parse_int(void *env, input_t *input, ulong *rcr) {
 
 node_t *parse_float(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
+  char cc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   size_t i = 0;
 
@@ -613,6 +638,7 @@ node_t *parse_float(void *env, input_t *input, ulong *rcr) {
 
 node_t *parse_char(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
+  char cc = 0;
 
   rc += input_skip(input, IGNORE_SET);
   
@@ -640,6 +666,7 @@ node_t *parse_char(void *env, input_t *input, ulong *rcr) {
 
 node_t *parse_str(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
+  char cc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   
   rc += input_skip(input, IGNORE_SET);
@@ -676,6 +703,7 @@ void closure_env_free(closure_env_t *this) {
 
 node_t *parse_op(closure_env_t *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
+  char cc = 0;
 
   rc += input_skip(input, IGNORE_SET);
 
@@ -686,6 +714,20 @@ node_t *parse_op(closure_env_t *env, input_t *input, ulong *rcr) {
 
   *rcr += rc;
   return node_new(env->type, 0, (free_f)nop_free);
+}
+
+// -- EOF_PARSER ------------------------
+
+node_t *parse_eof(void *env, input_t *input, ulong *rcr) {
+  ulong rc = 0;
+  char cc = 0;
+  
+  rc += input_skip(input, IGNORE_SET);
+  
+  if(input_move() != 0) input_fail();
+  
+  *rcr += rc;
+  return node_new(EOF_NODE, 0, (free_f)nop_free);
 }
 
 // -- MAIN_PARSER  ----------------------
@@ -757,6 +799,13 @@ comb_t *match_key(char *key, node_type type) {
   return match_custom(key, type, 0);
 }
 
+comb_t *match_eof() {
+  comb_t *res = comb_new();
+  res->type = COMB_JUST;
+  res->parse = parse_eof;
+  return res;
+}
+
 // -- JOINED_COMBINATORS ----------------
 
 comb_t *match_or(comb_t *this, stack_t *stack) {
@@ -792,6 +841,14 @@ comb_t *match_opt(comb_t *this, node_type type, comb_t *elem, comb_t *sep, int s
   this->sl     = sl;
   this->n_type = type;
   return this;
+}
+
+comb_t *expect(comb_t *this, char *desc) {
+  comb_t *res = comb_new();
+  res->type = COMB_EXPECT;
+  res->exp  = this;
+  res->desc = desc;
+  return res;
 }
 
 //---------------------------------------
@@ -837,6 +894,7 @@ void strl_emit(node_t *this, output_t *out) {
 void type_emit_head(node_t *this, output_t *out);
 void type_emit_tail(node_t *this, output_t *out);
 void type_emit(node_t *this, output_t *out);
+void var_decl_emit(node_t *this, output_t *out);
 void var_emit(node_t *this, output_t *out);
 void struct_emit(node_t *this, output_t *out);
 void decl_emit(node_t *this, output_t *out);
@@ -856,12 +914,15 @@ void exp_emit(node_t *this, output_t *out);
 #define F64_NODE 10
 #define VOID_NODE 11
 #define PTR_NODE 12
-#define DECL_NODE 765
-#define DECL_LIST_NODE 766
+#define VAR_DEF_NODE 765
+#define VAR_DEF_LIST_NODE 766
+#define STRUCT_DECL_NODE 54567
 #define STRUCT_NODE 13
+#define VAR_DECL_NODE 34536
 #define VAR_NODE 14
 #define VAR_LIST_NODE 55
 #define PARAM_LIST_NODE 5764
+#define FUN_DECL_NODE 8756
 #define FUN_NODE 66
 
 // TYPES
@@ -906,6 +967,7 @@ void exp_emit(node_t *this, output_t *out);
 #define SIZEOF_NODE 400
 #define JMP_NODE    401
 #define RET_NODE    402
+#define EXTERN_NODE 403
 
 // -- TYPE ------------------------------
 
@@ -996,6 +1058,21 @@ void type_emit(node_t *this, output_t *out) {
   type_emit_tail(this, out);
 }
 
+// -- VAR_DECL --------------------------
+
+// VAR_DECL_NODE:
+//  | extern
+//  | VAR
+//  | semicolon
+
+void var_decl_emit(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
+  stack_next(&stack);
+  emit(out, "extern ");
+  var_emit(stack_next(&stack), out);
+  emit_line(out, ";");
+}
+
 // -- VARIABLE --------------------------
 
 // VAR_NODE:
@@ -1013,6 +1090,22 @@ void var_emit(node_t *this, output_t *out) {
   str_emit(id_node, out);
   emit(out, " ");
   type_emit_tail(type_node, out);
+}
+
+// -- STRUCT_FORWARD_DECLARATION --------
+
+// STRUCT_DECL_NODE:
+//  | STR
+//  | ;
+
+void struct_decl_emit(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
+  node_t *id_node = stack_next(&stack);
+  emit(out, "typedef struct ");
+  str_emit(id_node, out);
+  emit(out, " ");
+  str_emit(id_node, out);
+  emit_line(out, ";");
 }
 
 // -- STRUCT ----------------------------
@@ -1048,9 +1141,44 @@ void struct_emit(node_t *this, output_t *out) {
   emit_line(out, ";");
 }
 
+// -- FUNCTION_FORWARD_DECLARATION ------
+
+// FUN_DECL_NODE
+//  | STR
+//  | | (
+//  | | | TYPE
+//  | | | ...
+//  | | ) 
+//  | | -> 
+//  | | TYPE
+//  | | ;
+
+void fun_decl_emit(node_t *this, output_t *out) {
+  stack_t *stack = this->node;
+  node_t *id_node = stack_next(&stack);
+  stack_t *type_stack = node_unwrap(stack_next(&stack));
+  stack_next(&type_stack);
+  stack_t *param_stack = node_unwrap(stack_next(&type_stack));
+  stack_next(&type_stack);
+  stack_next(&type_stack);
+  node_t *type = stack_next(&type_stack);
+  type_emit_head(type, out);
+  emit(out, " ");
+  str_emit(id_node, out);
+  emit(out, "(");
+  node_t *param = stack_next(&param_stack);
+  while(param) {
+    type_emit(param, out);
+    if((param = stack_next(&param_stack))) emit(out, ", ");
+  }
+  emit(out, ")");
+  type_emit_tail(type, out);
+  emit_line(out, ";");
+}
+
 // -- FUNCTION --------------------------
 
-// FUNCTION_NODE:
+// FUN_NODE:
 //  | STR
 //  | (
 //  | | VAR
@@ -1065,13 +1193,13 @@ void struct_emit(node_t *this, output_t *out) {
 //  | | ...
 //  | }
 
-// DECL_NODE:
+// VAR_DEF_NODE:
 //  | VAR
 //  | =
 //  | EXP
 //  | ;
 
-void decl_emit(node_t *this, output_t *out) {
+void var_def_emit(node_t *this, output_t *out) {
   stack_t *stack = this->node;
   node_t *var_node = stack_next(&stack);
   stack_next(&stack);
@@ -1090,7 +1218,7 @@ void fun_emit(node_t *this, output_t *out) {
   stack_next(&stack);
   stack_next(&stack);
   node_t *type_node = stack_next(&stack);
-  stack_t *decl_stack = node_unwrap(stack_next(&stack));
+  stack_t *var_def_stack = node_unwrap(stack_next(&stack));
   stack_next(&stack);
   stack_t *stm_stack = node_unwrap(stack_next(&stack));
   type_emit_head(type_node, out);
@@ -1106,7 +1234,7 @@ void fun_emit(node_t *this, output_t *out) {
   emit(out, ")");
   type_emit_tail(type_node, out);
   emit_line(out, " {");
-  stack_emit(decl_stack, out, (stack_emit_f)decl_emit);
+  stack_emit(var_def_stack, out, (stack_emit_f)var_def_emit);
   stack_emit(stm_stack, out, (stack_emit_f)stm_emit);
   emit_line(out, "}");
 }
@@ -1222,12 +1350,15 @@ void exp_emit(node_t *this, output_t *out) {
 
 parser_t *parser_create(input_t *input) {
   comb_t *base_comb        = comb_new();
+  comb_t *struct_decl_comb = comb_new();
   comb_t *struct_comb      = comb_new();
+  comb_t *fun_decl_comb    = comb_new();
   comb_t *fun_comb         = comb_new();
+  comb_t *var_decl_comb    = comb_new();
   comb_t *var_comb         = comb_new();
   comb_t *var_list_comb    = comb_new();
-  comb_t *decl_comb        = comb_new();
-  comb_t *decl_list_comb   = comb_new();
+  comb_t *var_def_comb        = comb_new();
+  comb_t *var_def_list_comb   = comb_new();
   comb_t *param_list_comb  = comb_new();
   comb_t *type_comb        = comb_new();
   comb_t *stm_comb         = comb_new();
@@ -1281,15 +1412,18 @@ parser_t *parser_create(input_t *input) {
   comb_t *sizeof_k = match_key("sizeof", SIZEOF_NODE);
   comb_t *jmp_k    = match_key("jmp", JMP_NODE);
   comb_t *ret_k    = match_key("ret", RET_NODE);
+  comb_t *extern_k = match_key("extern", EXTERN_NODE);
+  
+  comb_t *eof_comb = match_eof();
   
   stack_t *comb_stack = stack_from(base_comb, struct_comb, fun_comb, var_comb, 
-                           var_list_comb, decl_comb, decl_list_comb, param_list_comb, 
-                           type_comb, stm_comb, stm_list_comb, exp_comb, 
+                           var_list_comb, var_def_comb, var_def_list_comb, param_list_comb, 
+                           type_comb, stm_comb, stm_list_comb, exp_comb, struct_decl_comb,
                            id_type_comb, ptr_type_comb, fun_type_comb, arr_type_comb,
                            exp_stm_comb, label_stm_comb, jmp_con_stm_comb, jmp_stm_comb, 
                            ret_stm_comb, int_exp_comb, id_exp_comb, str_exp_comb, 
                            float_exp_comb, exp_list_comb, call_exp_comb, dot_exp_comb, 
-                           arrow_exp_comb, l_c_b_o, 
+                           arrow_exp_comb, l_c_b_o, fun_decl_comb, eof_comb, extern_k,
                            r_c_b_o, l_r_b_o, r_r_b_o, lt_o, gt_o, dot_o, arrow_o, 
                            colon_o, semicolon_o, comma_o, eq_o, u8_k, u16_k, sizeof_k, 
                            jmp_k, ret_k ,0);
@@ -1299,18 +1433,21 @@ parser_t *parser_create(input_t *input) {
   // types
   type_list_comb  = match_opt(type_list_comb, TYPE_LIST_NODE, share(type_comb), share(comma_o), 0);
   id_type_comb    = match_and(id_type_comb, ID_TYPE_NODE, stack_from(match_id(), 0)); 
-  ptr_type_comb   = match_and(ptr_type_comb, PTR_TYPE_NODE, stack_from(share(as_o), share(type_comb), 0));
+  ptr_type_comb   = match_and(ptr_type_comb, PTR_TYPE_NODE, stack_from(share(as_o), expect(share(type_comb), "type"), 0));
   fun_type_comb   = match_and(fun_type_comb, FUN_TYPE_NODE, stack_from(share(l_r_b_o), share(type_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), 0));
-  arr_type_comb   = match_and(arr_type_comb, ARR_TYPE_NODE, stack_from(share(l_s_b_o), share(type_comb), share(semicolon_o), share(exp_comb), share(r_s_b_o), 0));
+  arr_type_comb   = match_and(arr_type_comb, ARR_TYPE_NODE, stack_from(share(l_s_b_o), expect(share(type_comb), "type"), expect(share(semicolon_o), ";"), expect(share(exp_comb), "expression"), expect(share(r_s_b_o), "]"), 0));
   type_comb       = match_or(type_comb, stack_from(share(arr_type_comb), share(fun_type_comb), share(ptr_type_comb), share(id_type_comb), 0));
 
-  var_comb        = match_and(var_comb, VAR_NODE, stack_from(match_id(), share(colon_o), share(type_comb), 0));
-  var_list_comb   = match_opt(var_list_comb, VAR_LIST_NODE, share(var_comb), share(semicolon_o), 1);
-  decl_comb       = match_and(decl_comb, DECL_NODE, stack_from(share(var_comb), share(eq_o), share(exp_comb), 0));
-  decl_list_comb  = match_opt(decl_list_comb, DECL_LIST_NODE, share(decl_comb), share(semicolon_o), 1);
-  param_list_comb = match_opt(param_list_comb, PARAM_LIST_NODE, share(var_comb), share(comma_o), 0);
-  struct_comb     = match_and(struct_comb, STRUCT_NODE, stack_from(match_id(), share(l_c_b_o), share(var_list_comb), share(r_c_b_o), 0));
-  fun_comb        = match_and(fun_comb, FUN_NODE, stack_from(match_id(), share(l_r_b_o), share(param_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), share(decl_list_comb), share(l_c_b_o), share(stm_list_comb), share(r_c_b_o), 0));
+  var_decl_comb    = match_and(var_decl_comb, VAR_DECL_NODE, stack_from(share(extern_k), expect(share(var_comb), "variable declaration"), expect(share(semicolon_o), ";"), 0));
+  var_comb         = match_and(var_comb, VAR_NODE, stack_from(match_id(), share(colon_o), share(type_comb), 0));
+  var_list_comb    = match_opt(var_list_comb, VAR_LIST_NODE, share(var_comb), share(semicolon_o), 1);
+  var_def_comb        = match_and(var_def_comb, VAR_DEF_NODE, stack_from(share(var_comb), share(eq_o), share(exp_comb), share(semicolon_o), 0));
+  var_def_list_comb   = match_opt(var_def_list_comb, VAR_DEF_LIST_NODE, share(var_def_comb), 0, 0);
+  param_list_comb  = match_opt(param_list_comb, PARAM_LIST_NODE, share(var_comb), share(comma_o), 0);
+  struct_decl_comb = match_and(struct_decl_comb, STRUCT_DECL_NODE, stack_from(match_id(), share(semicolon_o), 0));
+  struct_comb      = match_and(struct_comb, STRUCT_NODE, stack_from(match_id(), share(l_c_b_o), share(var_list_comb), expect(share(r_c_b_o), "}"), 0));
+  fun_decl_comb    = match_and(fun_decl_comb, FUN_DECL_NODE, stack_from(match_id(), share(fun_type_comb), share(semicolon_o), 0));
+  fun_comb         = match_and(fun_comb, FUN_NODE, stack_from(match_id(), share(l_r_b_o), share(param_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), share(var_def_list_comb), share(l_c_b_o), share(stm_list_comb), share(r_c_b_o), 0));
   
   exp_comb       = match_or(exp_comb, stack_from(share(int_exp_comb), share(id_exp_comb), share(str_exp_comb), share(float_exp_comb), share(call_exp_comb), 0));
 
@@ -1332,10 +1469,10 @@ parser_t *parser_create(input_t *input) {
   exp_list_comb    = match_opt(exp_list_comb, EXP_LIST_NODE, share(exp_comb), 0, 0);
   call_exp_comb    = match_and(call_exp_comb, CALL_EXP_NODE, stack_from(share(l_r_b_o), share(exp_list_comb), share(r_r_b_o), 0));
   
+  base_comb = match_or(base_comb, stack_from(share(struct_comb), share(var_decl_comb), share(fun_decl_comb), share(fun_comb), share(struct_decl_comb), share(var_def_comb), share(eof_comb), 0));
+  
 #undef share
-  
-  base_comb = match_or(base_comb, stack_from(struct_comb, fun_comb, 0));
-  
+
   return parser_new(input, comb_share(base_comb), comb_stack);
 }
 
@@ -1354,6 +1491,7 @@ const char *file_prefix =            "\
 #define pget(var1, var2) var1->var2 \n\
 #define cast(var, type) ((type)var) \n\
 #define size(exp) sizeof(exp)       \n\
+#define init(...) { __VA_ARGS__ }   \n\
 ";
 
 //---------------------------------------
@@ -1389,7 +1527,10 @@ int main(int argc, char **argv) {
 
   for(node_t *node = 0;;) {
     node = parse(parser);
-    if(!node) break;
+    if(!node) {
+      error("unable to parse complete input");
+      break;
+    }
     switch(node->type) {
       case STRUCT_NODE: {
         log("parsed struct");
@@ -1397,17 +1538,41 @@ int main(int argc, char **argv) {
         break;
       }
       case FUN_NODE: {
-        log("parse function");
+        log("parsed function");
         fun_emit(node, output);
         break;
+      }
+      case STRUCT_DECL_NODE: {
+        log("parsed struct forward declaration");
+        struct_decl_emit(node, output);
+        break;
+      }
+      case VAR_DEF_NODE: {
+        log("parsed variable definition");
+        var_def_emit(node, output);
+        break;
+      }
+      case FUN_DECL_NODE: {
+        log("parsed function declaration");
+        fun_decl_emit(node, output);
+        break;
+      }
+      case VAR_DECL_NODE: {
+        log("parsed variable declaration");
+        var_decl_emit(node, output);
+        break;
+      }
+      case EOF_NODE: {
+        printf("done!\n");
+        goto cleanup;
       }
       default:
         panic("parsed undefined node");
     }
+    node_free(node);
   }
-  
-  printf("done!\n");
-  
+
+cleanup:  
   // cleanup
   parser_free(parser);
   output_free(output);
