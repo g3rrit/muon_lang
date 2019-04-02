@@ -885,8 +885,6 @@ void exp_emit(node_t *this, output_t *out);
 #define FLOAT_EXP_NODE 702
 #define STR_EXP_NODE 709
 #define CALL_EXP_NODE 703
-#define CAST_EXP_NODE 706
-#define SIZEOF_EXP_NODE 707
 #define EXP_LIST_NODE 708
 
 #define L_C_B_NODE 50
@@ -1177,14 +1175,6 @@ void stm_emit(node_t *this, output_t *out) {
 //  | STR
 // FLOAT_EXP: 
 //  | FLOAT
-// CAST_EXP: 
-//  | <
-//  | TYPE
-//  | >
-//  | EXP
-// SIZEOF_EXP: 
-//  | sizeof
-//  | EXP
 // CALL_EXP: 
 //  | (
 //  | | EXP
@@ -1205,21 +1195,6 @@ void exp_emit(node_t *this, output_t *out) {
       break;
     case FLOAT_EXP_NODE:
       float_emit(stack_next(&stack), out);
-      break;
-    case CAST_EXP_NODE:
-      emit(out, "(");
-      stack_next(&stack);
-      type_emit(stack_next(&stack), out);
-      stack_next(&stack);
-      emit(out, ")(");
-      exp_emit(stack_next(&stack), out);
-      emit(out, ")");
-      break;
-    case SIZEOF_EXP_NODE:
-      emit(out, "sizeof(");
-      stack_next(&stack);
-      type_emit(stack_next(&stack), out);
-      emit(out, ")");
       break;
     case CALL_EXP_NODE: {
       stack_next(&stack);
@@ -1282,8 +1257,6 @@ parser_t *parser_create(input_t *input) {
   comb_t *call_exp_comb    = comb_new();
   comb_t *dot_exp_comb     = comb_new();
   comb_t *arrow_exp_comb   = comb_new();
-  comb_t *cast_exp_comb    = comb_new();
-  comb_t *sizeof_exp_comb  = comb_new();
 
   // operators
   comb_t *l_c_b_o     = match_op("{", L_C_B_NODE);
@@ -1316,7 +1289,7 @@ parser_t *parser_create(input_t *input) {
                            exp_stm_comb, label_stm_comb, jmp_con_stm_comb, jmp_stm_comb, 
                            ret_stm_comb, int_exp_comb, id_exp_comb, str_exp_comb, 
                            float_exp_comb, exp_list_comb, call_exp_comb, dot_exp_comb, 
-                           arrow_exp_comb, cast_exp_comb, sizeof_exp_comb, l_c_b_o, 
+                           arrow_exp_comb, l_c_b_o, 
                            r_c_b_o, l_r_b_o, r_r_b_o, lt_o, gt_o, dot_o, arrow_o, 
                            colon_o, semicolon_o, comma_o, eq_o, u8_k, u16_k, sizeof_k, 
                            jmp_k, ret_k ,0);
@@ -1339,7 +1312,7 @@ parser_t *parser_create(input_t *input) {
   struct_comb     = match_and(struct_comb, STRUCT_NODE, stack_from(match_id(), share(l_c_b_o), share(var_list_comb), share(r_c_b_o), 0));
   fun_comb        = match_and(fun_comb, FUN_NODE, stack_from(match_id(), share(l_r_b_o), share(param_list_comb), share(r_r_b_o), share(arrow_o), share(type_comb), share(decl_list_comb), share(l_c_b_o), share(stm_list_comb), share(r_c_b_o), 0));
   
-  exp_comb       = match_or(exp_comb, stack_from(share(int_exp_comb), share(id_exp_comb), share(str_exp_comb), share(float_exp_comb), share(cast_exp_comb), share(sizeof_exp_comb), share(call_exp_comb), 0));
+  exp_comb       = match_or(exp_comb, stack_from(share(int_exp_comb), share(id_exp_comb), share(str_exp_comb), share(float_exp_comb), share(call_exp_comb), 0));
 
   stm_comb        = match_or(stm_comb, stack_from(share(semicolon_o), share(exp_stm_comb), share(label_stm_comb), share(jmp_stm_comb), share(jmp_con_stm_comb), share(ret_stm_comb), 0));
   stm_list_comb   = match_opt(stm_list_comb, STM_LIST_NODE, share(stm_comb), 0, 0);
@@ -1358,8 +1331,6 @@ parser_t *parser_create(input_t *input) {
   float_exp_comb   = match_and(float_exp_comb, FLOAT_EXP_NODE, stack_from(match_float(), 0));
   exp_list_comb    = match_opt(exp_list_comb, EXP_LIST_NODE, share(exp_comb), 0, 0);
   call_exp_comb    = match_and(call_exp_comb, CALL_EXP_NODE, stack_from(share(l_r_b_o), share(exp_list_comb), share(r_r_b_o), 0));
-  cast_exp_comb    = match_and(cast_exp_comb, CAST_EXP_NODE, stack_from(share(lt_o), share(type_comb), share(gt_o), share(exp_comb), 0));
-  sizeof_exp_comb  = match_and(sizeof_exp_comb, SIZEOF_EXP_NODE, stack_from(share(sizeof_k), share(type_comb), 0));
   
 #undef share
   
@@ -1381,6 +1352,8 @@ const char *file_prefix =            "\
 #define deref(var) *var             \n\
 #define get(var1, var2) var1.var2   \n\
 #define pget(var1, var2) var1->var2 \n\
+#define cast(var, type) ((type)var) \n\
+#define size(exp) sizeof(exp)       \n\
 ";
 
 //---------------------------------------
