@@ -127,14 +127,21 @@ stack_t *stack_from(void *obj, ...) {
   return res;
 }
 
+/*
 #define stack_free(stack, free_fun) {                          \
   for(void *obj = 0; (obj = stack_pop(stack)); free_fun(obj)); \
 }
+*/
+void stack_free(stack_t **stack, void(*free_f)(void*)) {
+  for(void *obj = 0; (obj = stack_pop(stack)); free_f(obj));
+}
 
+/*
 // this macro also destroyes the stack
 #define stack_for_each(stack, block) {                    \
   for(void *obj = 0; (obj = stack_pop(stack));) { block } \
 }
+*/
 
 //---------------------------------------
 // INPUT
@@ -294,14 +301,12 @@ void node_free(node_t *this) {
 
 void *node_unwrap(node_t *this) {
   if(!this) return 0;
-  void *res = this->node;
-  free(this);
-  return res;
+  return this->node;
 }
 
 void node_stack_free(stack_t *this) {
   if(!this) return;
-  stack_free(&this, node_free);
+  stack_free(&this, (free_f)node_free);
 }
 
 //---------------------------------------
@@ -456,7 +461,7 @@ void comb_free(comb_t *this) {
       break;
     case COMB_OR:
     case COMB_AND:
-      stack_free(&this->stack, comb_free);
+      stack_free(&this->stack, (free_f)comb_free);
       break;
     case COMB_OPT:
       comb_free(this->elem);
@@ -489,7 +494,7 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
   } else if(this->type == COMB_AND) {
     while((comb_elem = stack_next(&in_stack))) {
       if(!(res = comb_parse(input, comb_elem, &rc))) {
-        stack_free(&stack, node_free); 
+        stack_free(&stack, (free_f)node_free); 
         input_rewind(input, rc);
         rc = 0;
         return 0;
@@ -507,13 +512,15 @@ node_t *comb_parse(input_t *input, comb_t *this, ulong *rcr) {
       if(this->sep) {
         if(!(res = comb_parse(input, this->sep, &rc))) {
           if(this->sl) {
-            stack_free(&stack, node_free);
+            stack_free(&stack, (free_f)node_free);
             input_rewind(input, rc);
             rc = 0;
             return 0;
           } else {
             break;
           }
+        } else {
+          node_free(res);
         } 
       }
     }
@@ -553,7 +560,7 @@ void parser_free(parser_t *this) {
   if(!this) return;
   input_free(this->input);
   comb_free(this->base);
-  stack_free(&this->comb_stack, comb_free);
+  stack_free(&this->comb_stack, (free_f)comb_free);
   free(this);
 }
 
@@ -897,23 +904,14 @@ void type_emit_tail(node_t *this, output_t *out);
 void type_emit(node_t *this, output_t *out);
 void var_decl_emit(node_t *this, output_t *out);
 void var_emit(node_t *this, output_t *out);
+void var_def_emit(node_t *this, output_t *out);
+void struct_decl_emit(node_t *this, output_t *out);
 void struct_emit(node_t *this, output_t *out);
-void decl_emit(node_t *this, output_t *out);
+void fun_decl_emit(node_t *this, output_t *out);
 void fun_emit(node_t *this, output_t *out);
 void stm_emit(node_t *this, output_t *out);
 void exp_emit(node_t *this, output_t *out);
 // --  ----------------------------------
-#define U8_NODE 1
-#define I8_NODE 2
-#define U16_NODE 3
-#define I16_NODE 4
-#define U32_NODE 5
-#define I32_NODE 6
-#define U64_NODE 7
-#define I64_NODE 8
-#define F32_NODE 9
-#define F64_NODE 10
-#define VOID_NODE 11
 #define PTR_NODE 12
 #define VAR_DEF_NODE 765
 #define VAR_DEF_LIST_NODE 766
@@ -1408,9 +1406,6 @@ parser_t *parser_create(input_t *input) {
   comb_t *as_o        = match_op("*", AS_NODE);
   
   // keywords
-  comb_t *u8_k     = match_key("u8", U8_NODE);
-  comb_t *u16_k    = match_key("u16", U16_NODE);
-  comb_t *sizeof_k = match_key("sizeof", SIZEOF_NODE);
   comb_t *jmp_k    = match_key("jmp", JMP_NODE);
   comb_t *ret_k    = match_key("ret", RET_NODE);
   comb_t *extern_k = match_key("extern", EXTERN_NODE);
@@ -1426,8 +1421,8 @@ parser_t *parser_create(input_t *input) {
                            float_exp_comb, exp_list_comb, call_exp_comb, dot_exp_comb, 
                            arrow_exp_comb, l_c_b_o, fun_decl_comb, eof_comb, extern_k,
                            r_c_b_o, l_r_b_o, r_r_b_o, lt_o, gt_o, dot_o, arrow_o, 
-                           colon_o, semicolon_o, comma_o, eq_o, u8_k, u16_k, sizeof_k, 
-                           jmp_k, ret_k ,0);
+                           colon_o, semicolon_o, comma_o, eq_o, jmp_k, ret_k ,0);
+                           
 
 #define share comb_share
   
@@ -1570,7 +1565,7 @@ int main(int argc, char **argv) {
       default:
         panic("parsed undefined node");
     }
-    //node_free(node); //TODO
+    node_free(node);
   }
 
 cleanup:  

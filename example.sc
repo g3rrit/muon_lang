@@ -1,11 +1,15 @@
 foo_t;
 
-gfoo : *foo_t = (init 0);
+test () -> void 
+i : int = 0;
+y : to = 0; { }
 
 foo_t {
   id : *char;
   val : int;
 }
+
+gfoo : *foo_t = (init 0);
 
 bar((*foo_t) -> void, *foo_t) -> void;
 
