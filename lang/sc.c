@@ -30,17 +30,27 @@ typedef void (*free_f)(void*);
 // UTIL 
 //---------------------------------------
 
+//#define DEBUG
+
 #define error(...) {             \
   fprintf(stderr, "|ERROR| - "); \
   fprintf(stderr, __VA_ARGS__);  \
   fprintf(stderr, "\n");         \
 }
 
+#ifdef DEBUG
+
 #define log(...) {              \
   fprintf(stdout, "|LOG| - ");  \
   fprintf(stdout, __VA_ARGS__); \
   fprintf(stdout, "\n");        \
 }
+
+#else
+
+#define log(...) 
+
+#endif
 
 #define panic(...) {                   \
   fprintf(stderr, "|FATAL ERROR| - "); \
@@ -127,21 +137,9 @@ stack_t *stack_from(void *obj, ...) {
   return res;
 }
 
-/*
-#define stack_free(stack, free_fun) {                          \
-  for(void *obj = 0; (obj = stack_pop(stack)); free_fun(obj)); \
-}
-*/
 void stack_free(stack_t **stack, void(*free_f)(void*)) {
   for(void *obj = 0; (obj = stack_pop(stack)); free_f(obj));
 }
-
-/*
-// this macro also destroyes the stack
-#define stack_for_each(stack, block) {                    \
-  for(void *obj = 0; (obj = stack_pop(stack));) { block } \
-}
-*/
 
 //---------------------------------------
 // INPUT
@@ -172,10 +170,8 @@ void input_free(input_t *this) {
   free(this);
 }
 
-#define print_char(c) (c >= 32 && c <= 126 ? printf("n[%c]\n", c) : printf("n[-]\n"));
 char input_next(input_t *this) {
   int c = fgetc(this->file); 
-  //print_char(c);
   if(c == EOF) {
     log("end of file");
     return (char)0;
@@ -184,7 +180,6 @@ char input_next(input_t *this) {
 }
 
 void input_rewind(input_t *this, ulong n) {
-  //printf("r[%d]", n);
   if(fseek(this->file, (long int)-n, SEEK_CUR)) {
     panic("unable to rewind %lu chars", n);
   }
@@ -196,13 +191,38 @@ char input_peek(input_t *this) {
   return c;
 }
 
-int input_skip(input_t *this, char *set) {
+int input_skip(input_t *this) {
   char c = 0;
   int count = -1;
+  // 0 - normal | 1 - in line comment | 2 - in multiline comment
+  int state = 0; 
   do {
     c = input_next(this);
     count++;
-  } while(strchr(set, c) && c);
+    if(state == 1) {
+      if(c == '\n') { 
+        c = input_next(this);
+        count++;
+        state = 0;
+      }
+    } else if(state == 2) {
+      if(c == '*' && input_peek(this) == '/') {
+        c = (input_next(this), input_next(this));
+        count += 2;
+        state = 0;
+      }
+    } else {
+      if(c == '/') {
+        char p = input_peek(this);
+        if(p == '/') state = 1;
+        if(p == '*') { 
+          state = 2;
+          input_next(this);
+          count++;
+        }
+      }
+    }
+  } while(c && (state || strchr(IGNORE_SET, c)));
   if(c) input_rewind(this, 1);
   return count;
 }
@@ -578,7 +598,7 @@ node_t *parse_id(void *env, input_t *input, ulong *rcr) {
   char cc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   
-  rc += input_skip(input, IGNORE_SET);
+  rc += input_skip(input);
 
   if(!is_alpha(buffer[0] = input_move())) input_fail();
   size_t i = 1;
@@ -600,14 +620,14 @@ node_t *parse_int(void *env, input_t *input, ulong *rcr) {
   char cc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   
-  rc += input_skip(input, IGNORE_SET);
+  rc += input_skip(input);
 
   size_t i = 0;
   if(!is_num(input_peek(input))) input_fail();
   for(;is_num(buffer[i] = input_move()); i++) {
     if(i >= MAX_STR_LEN) panic("integer string too long");
   }
-  if(strchr(".f", buffer[i])) input_fail(); // TODO: what if: 123fid
+  if(strchr(".f", buffer[i])) input_fail();
   input_rewind(input, 1);
 
   *rcr += rc;
@@ -622,7 +642,7 @@ node_t *parse_float(void *env, input_t *input, ulong *rcr) {
   char buffer[MAX_STR_LEN] = { 0 };
   size_t i = 0;
 
-  rc += input_skip(input, IGNORE_SET);
+  rc += input_skip(input);
 
   if(!is_num(input_peek(input))) input_fail();
   for(; is_num(buffer[i] = input_move()); i++) {
@@ -648,7 +668,7 @@ node_t *parse_char(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
   char cc = 0;
 
-  rc += input_skip(input, IGNORE_SET);
+  rc += input_skip(input);
   
   char c = 0;
   if(input_move() != '\'') input_fail();
@@ -677,7 +697,7 @@ node_t *parse_str(void *env, input_t *input, ulong *rcr) {
   char cc = 0;
   char buffer[MAX_STR_LEN] = { 0 };
   
-  rc += input_skip(input, IGNORE_SET);
+  rc += input_skip(input);
 
   if(input_move() != '"') input_fail();
   size_t i = 0;
@@ -713,7 +733,7 @@ node_t *parse_op(closure_env_t *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
   char cc = 0;
 
-  rc += input_skip(input, IGNORE_SET);
+  rc += input_skip(input);
 
   for(size_t i = 0; env->ref[i]; i++) {
     if(input_move() != env->ref[i]) input_fail();
@@ -730,7 +750,7 @@ node_t *parse_eof(void *env, input_t *input, ulong *rcr) {
   ulong rc = 0;
   char cc = 0;
   
-  rc += input_skip(input, IGNORE_SET);
+  rc += input_skip(input);
   
   if(input_move() != 0) input_fail();
   
@@ -912,61 +932,57 @@ void fun_emit(node_t *this, output_t *out);
 void stm_emit(node_t *this, output_t *out);
 void exp_emit(node_t *this, output_t *out);
 // --  ----------------------------------
-#define PTR_NODE 12
-#define VAR_DEF_NODE 765
-#define VAR_DEF_LIST_NODE 766
-#define STRUCT_DECL_NODE 54567
-#define STRUCT_NODE 13
-#define VAR_DECL_NODE 34536
-#define VAR_NODE 14
-#define VAR_LIST_NODE 55
-#define PARAM_LIST_NODE 5764
-#define FUN_DECL_NODE 8756
-#define FUN_NODE 66
+#define PTR_NODE          1
+#define VAR_DEF_NODE      2
+#define VAR_DEF_LIST_NODE 3
+#define STRUCT_DECL_NODE  4
+#define STRUCT_NODE       5
+#define VAR_DECL_NODE     6
+#define VAR_NODE          7
+#define VAR_LIST_NODE     8
+#define PARAM_LIST_NODE   9
+#define FUN_DECL_NODE     10
+#define FUN_NODE          11
 
 // TYPES
-#define ID_TYPE_NODE 9001
-#define PTR_TYPE_NODE 9002
-#define FUN_TYPE_NODE 9003
-#define ARR_TYPE_NODE 9004
-#define TYPE_LIST_NODE 9005
+#define ID_TYPE_NODE      12
+#define PTR_TYPE_NODE     13
+#define FUN_TYPE_NODE     14
+#define ARR_TYPE_NODE     15
+#define TYPE_LIST_NODE    16
 
 // STATEMENTS
-#define EXP_STM_NODE 301
-#define JMP_STM_NODE     303
-#define JMP_CON_STM_NODE 308
-#define LABEL_STM_NODE   304
-#define RET_STM_NODE 305
-#define STM_LIST_NODE 306
+#define EXP_STM_NODE      17
+#define JMP_STM_NODE      18
+#define JMP_CON_STM_NODE  19
+#define LABEL_STM_NODE    20
+#define RET_STM_NODE      21  
+#define STM_LIST_NODE     22
 
 // EXPRESSIONS
-#define INT_EXP_NODE 700
-#define ID_EXP_NODE  701
-#define FLOAT_EXP_NODE 702
-#define STR_EXP_NODE 709
-#define CALL_EXP_NODE 703
-#define EXP_LIST_NODE 708
+#define INT_EXP_NODE      23
+#define ID_EXP_NODE       24
+#define FLOAT_EXP_NODE    25
+#define STR_EXP_NODE      26
+#define CALL_EXP_NODE     27
+#define EXP_LIST_NODE     28
 
-#define L_C_B_NODE 50
-#define R_C_B_NODE 51
-#define L_R_B_NODE 52
-#define R_R_B_NODE 53
-#define L_S_B_NODE 54
-#define R_S_B_NODE 55
-#define LT_NODE    801
-#define GT_NODE    802
-#define DOT_NODE   800
-#define ARROW_NODE 100
-#define COMMA_NODE 101
-#define COLON_NODE 56
-#define SEMICOLON_NODE 57
-#define EQ_NODE  909
-#define AS_NODE  910
+#define L_C_B_NODE        29
+#define R_C_B_NODE        30
+#define L_R_B_NODE        31
+#define R_R_B_NODE        32
+#define L_S_B_NODE        33
+#define R_S_B_NODE        34
+#define ARROW_NODE        35
+#define COMMA_NODE        36
+#define COLON_NODE        37
+#define SEMICOLON_NODE    38
+#define EQ_NODE           39
+#define AS_NODE           40
 
-#define SIZEOF_NODE 400
-#define JMP_NODE    401
-#define RET_NODE    402
-#define EXTERN_NODE 403
+#define JMP_NODE          41
+#define RET_NODE          42
+#define EXTERN_NODE       43
 
 // -- TYPE ------------------------------
 
@@ -1396,9 +1412,6 @@ parser_t *parser_create(input_t *input) {
   comb_t *r_r_b_o           = match_op(")", R_R_B_NODE);
   comb_t *l_s_b_o           = match_op("[", L_S_B_NODE);
   comb_t *r_s_b_o           = match_op("]", R_S_B_NODE);
-  comb_t *lt_o              = match_op("<", LT_NODE);
-  comb_t *gt_o              = match_op(">", GT_NODE);
-  comb_t *dot_o             = match_op(".", DOT_NODE);
   comb_t *arrow_o           = match_op("->", ARROW_NODE);
   comb_t *colon_o           = match_op(":", COLON_NODE);
   comb_t *semicolon_o       = match_op(";", SEMICOLON_NODE);
@@ -1421,7 +1434,7 @@ parser_t *parser_create(input_t *input) {
                            ret_stm_comb, int_exp_comb, id_exp_comb, str_exp_comb, 
                            float_exp_comb, exp_list_comb, call_exp_comb, dot_exp_comb, 
                            arrow_exp_comb, l_c_b_o, fun_decl_comb, eof_comb, extern_k,
-                           r_c_b_o, l_r_b_o, r_r_b_o, lt_o, gt_o, dot_o, arrow_o, 
+                           r_c_b_o, l_r_b_o, r_r_b_o, arrow_o, 
                            colon_o, semicolon_o, comma_o, eq_o, jmp_k, ret_k ,0);
                            
 
@@ -1642,7 +1655,7 @@ parser_t *parser_create(input_t *input) {
 //---------------------------------------
 
 const char *file_prefix =                 "\
-#define set(lexp, rexp)  (exp = exp)     \n\
+#define set(lexp, rexp)  (lexp = rexp)   \n\
 #define ref(exp)         (&exp)          \n\
 #define deref(exp)       (*exp)          \n\
 #define get(lexp, rexp)  (lexp.rexp)     \n\

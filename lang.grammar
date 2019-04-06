@@ -1,14 +1,19 @@
 
 file : /* empty */
-     | file struct ;
-     | file var ;
      | file var = exp ;
+     | file var_decl ;
+     | file function_decl ;
+     | file struct_decl ;
+     | file struct 
      | file function
      ;
    
 //---------------------------------------
 // STRUCT 
 //---------------------------------------
+
+struct_decl : id
+            ;
 
 struct : id { struct' }
        ;
@@ -21,24 +26,14 @@ struct' : var ; struct'
 // STATEMENT
 //---------------------------------------
 
-stm : con_stm
-    | while exp stm
-    | stm_lst
+stm : jmp exp id ;
+    | jmp id ;
+    | id :
+    | ret exp ;
     | exp ;
-    | struct ;
-    | var ;
-    | var = exp ;
     | ;
     ;
     
-con_stm : if exp stm con_stm'
-        ;
-
-con_stm' : elif exp stm con_stm'
-         | else stm
-         | /* empty */
-         ;
- 
 stm_lst : { stm_lst' }
         ;
         
@@ -50,6 +45,9 @@ stm_lst' : stm stm_lst'
 // VARIABLE
 //---------------------------------------
 
+var_decl : extern id : type
+         ;
+
 var : id : type
     ;
 
@@ -57,18 +55,7 @@ var : id : type
 // TYPE
 //---------------------------------------
 
-type : i8 type'
-     | u8 type'
-     | i16 type'
-     | u16 type'
-     | i32 type'
-     | u32 type'
-     | i64 type'
-     | u64 type'
-     | f32 type'
-     | f64 type'
-     | void type'
-     | id type'
+type : id type'
      | [type; exp] type'
      | function_type type'
      ;
@@ -91,10 +78,13 @@ function_type' : type , function_type'
 // FUNCTION
 //---------------------------------------
 
-function : id ( ) stm
-         | id ( ) -> type stm
-         | id ( function' ) stm
-         | id ( function' ) -> type stm
+function_decl : id function_type 
+              ;
+
+function : id ( ) stm_lst
+         | id ( ) -> type stm_lst
+         | id ( function' ) stm_lst
+         | id ( function' ) -> type stm_lst
          ;
 
 function' : var , function'
@@ -104,58 +94,13 @@ function' : var , function'
 // EXPRESSION 
 //---------------------------------------
 
-p_exp : int_l
-      | float_l
-      | string_l
-      | id
-      | sizeof ( type )
-      | ++ exp
-      | -- exp
-      | + exp
-      | - exp
-      | ! exp
-      | ~ exp
-      | < type > exp
-      | * exp
-      | & exp
-      | ( exp )
-      ;
-      
-exp : p_exp . p_exp
-    | p_exp -> p_exp 
-    | p_exp [ p_exp ] 
-    | p_exp ( arg_lst )
-    | p_exp mult p_exp 
-    | p_exp div p_exp 
-    | p_exp mod p_exp 
-    | p_exp add p_exp 
-    | p_exp sub p_exp 
-    | p_exp ls p_exp 
-    | p_exp rs p_exp 
-    | p_exp lt p_exp 
-    | p_exp gt p_exp 
-    | p_exp <= p_exp 
-    | p_exp >= p_exp 
-    | p_exp == p_exp 
-    | p_exp != p_exp 
-    | p_exp band p_exp 
-    | p_exp bxor p_exp 
-    | p_exp bor p_exp 
-    | p_exp and p_exp 
-    | p_exp or p_exp 
-    | p_exp = p_exp 
-    | p_exp += p_exp 
-    | p_exp -= p_exp 
-    | p_exp *= p_exp 
-    | p_exp /= p_exp 
-    | p_exp %= p_exp 
-    | p_exp <<= p_exp 
-    | p_exp >>= p_exp 
-    | p_exp &= p_exp 
-    | p_exp ^= p_exp 
-    | p_exp |= p_exp 
+exp : int_l
+    | float_l
+    | string_l
+    | id
+    | ( exp_lst )
     ;
-     
-arg_lst : exp , arg_lst
+      
+exp_lst : exp exp_lst
         | exp 
         ;
