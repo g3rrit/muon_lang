@@ -965,24 +965,25 @@ void exp_emit(node_t *this, output_t *out);
 #define FLOAT_EXP_NODE    25
 #define STR_EXP_NODE      26
 #define CALL_EXP_NODE     27
-#define EXP_LIST_NODE     28
+#define CHAR_EXP_NODE     28
+#define EXP_LIST_NODE     29
 
-#define L_C_B_NODE        29
-#define R_C_B_NODE        30
-#define L_R_B_NODE        31
-#define R_R_B_NODE        32
-#define L_S_B_NODE        33
-#define R_S_B_NODE        34
-#define ARROW_NODE        35
-#define COMMA_NODE        36
-#define COLON_NODE        37
-#define SEMICOLON_NODE    38
-#define EQ_NODE           39
-#define AS_NODE           40
+#define L_C_B_NODE        30 
+#define R_C_B_NODE        31
+#define L_R_B_NODE        32
+#define R_R_B_NODE        33
+#define L_S_B_NODE        34
+#define R_S_B_NODE        35
+#define ARROW_NODE        36
+#define COMMA_NODE        37
+#define COLON_NODE        38
+#define SEMICOLON_NODE    39
+#define EQ_NODE           40
+#define AS_NODE           41
 
-#define JMP_NODE          41
-#define RET_NODE          42
-#define EXTERN_NODE       43
+#define JMP_NODE          42
+#define RET_NODE          43
+#define EXTERN_NODE       44
 
 // -- TYPE ------------------------------
 
@@ -1339,6 +1340,8 @@ void exp_emit(node_t *this, output_t *out) {
     case FLOAT_EXP_NODE:
       float_emit(stack_next(&stack), out);
       break;
+    case CHAR_EXP_NODE:
+      charl_emit(stack_next(&stack), out);
     case CALL_EXP_NODE: {
       stack_next(&stack);
       stack_t *exp_stack = node_unwrap(stack_next(&stack));
@@ -1400,6 +1403,7 @@ parser_t *parser_create(input_t *input) {
   comb_t *id_exp_comb       = comb_new();
   comb_t *str_exp_comb      = comb_new();
   comb_t *float_exp_comb    = comb_new();
+  comb_t *char_exp_comb     = comb_new();
   comb_t *exp_list_comb     = comb_new();
   comb_t *call_exp_comb     = comb_new();
   comb_t *dot_exp_comb      = comb_new();
@@ -1434,7 +1438,7 @@ parser_t *parser_create(input_t *input) {
                            ret_stm_comb, int_exp_comb, id_exp_comb, str_exp_comb, 
                            float_exp_comb, exp_list_comb, call_exp_comb, dot_exp_comb, 
                            arrow_exp_comb, l_c_b_o, fun_decl_comb, eof_comb, extern_k,
-                           r_c_b_o, l_r_b_o, r_r_b_o, arrow_o, 
+                           r_c_b_o, l_r_b_o, r_r_b_o, arrow_o, char_exp_comb,
                            colon_o, semicolon_o, comma_o, eq_o, jmp_k, ret_k ,0);
                            
 
@@ -1602,6 +1606,7 @@ parser_t *parser_create(input_t *input) {
            share(id_exp_comb),                               // | ID_EXP
            share(str_exp_comb),                              // | STR_EXP
            share(float_exp_comb),                            // | FLOAT_EXP
+           share(char_exp_comb),                             // | CHAR_EXP
            share(call_exp_comb));                            // | CALL_EXP
 
   MATCH_OPT(exp_list_comb,                                   // ___________________
@@ -1625,6 +1630,10 @@ parser_t *parser_create(input_t *input) {
   MATCH_AND(float_exp_comb,                                  // ____________________
             FLOAT_EXP_NODE,                                  // - FLOAT_EXPRESSION -
             match_float());                                  // FLOAT
+  
+  MATCH_AND(char_exp_comb,                                   // ___________________
+            CHAR_EXP_NODE,                                   // - CHAR_EXPRESSION -
+            match_char());                                   // CHAR
 
   MATCH_AND(call_exp_comb,                                   // ___________________
             CALL_EXP_NODE,                                   // - CALL_EXPRESSION -

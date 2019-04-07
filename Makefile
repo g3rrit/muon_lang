@@ -1,7 +1,7 @@
 CC = gcc
 OUT_DIR = build
 OUT = comp
-SRC = lang/sc.c
+SRC = lang/muon.c
 FLAGS = -Wall
 
 MKDIR_P = mkdir -p
