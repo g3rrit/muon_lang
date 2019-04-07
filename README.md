@@ -7,7 +7,7 @@
 This project is intended to be viewed as a simple demonstration for 
 a transpiler written in < 2000 lines of c code.
 It was originally intended to be just a simple exercise in writing 
-a basic *Parser-Combinator*.
+a basic **Parser-Combinator**.
 Altough it is able to produce valid c code, it is
 still far from being usable without a firm understanding of how the
 transpiler works.
