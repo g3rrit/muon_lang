@@ -18,16 +18,17 @@ It is also my first project i would really consider finished.
 That said if you're still interessted, i invite you to have a look around.
 You can contact me at <gerrit.proessl@gmail.com>.
 I would certainly appreciate any feedback :)
+> Names that end with _t are reserved by POSIX
 
 ## The Muon Language
 ---
 
-*Muon* is a syntactically simple imperative language.
-The transpiler emits *c* code.
+**Muon** is a syntactically simple imperative language.
+The transpiler emits **c** code.
 It strongly relies on and heavily utilizes constructs
-found in the *c language*.
+found in the **c language**.
 It is only possible to transpile one file programs.
-The formal grammar for the language can be found at <./lang.grammar>
+The formal grammar for the language can be found at ./lang.grammar
 
 ## Building
 ---
@@ -125,47 +126,53 @@ return 0;
 }
 ```
 
-You can find another example program at <./example.mn>.
+You can find another example program at ./example.mn.
 
 ## Documentation
 ---
 
-##### Types
+### Types
 The languages support four basic forms of types.
 * Array Types
 * Function Types
 * Pointer Types
 * Identifier Types
 
-###### Identifier Types
+#### Identifier Types
 As the transpiler does no typechecking there is no need for 
 introducing primative types. All primative types and compound types
 (defined by structures) are just **Identifier Types**.
 
-###### Array Types
+#### Array Types
 **Array Types** are for declaring an array of variables.
 **Array Types** are declared in the following way:
-`[type; exp]`
+```c
+[type; exp]
+```
 where **type** describes the type of an element
 and **exp** describes the size of the array as an expression.
 (Note: the size needs to be a constant expression if the array
 is declared outside of a function)
 
-###### Function Types
+#### Function Types
 **Function types** are for declaring a pointer to a function.
 They are declared in the following way:
-`(param_type_1, param_type_2, ...) -> return_type`
+```c
+(param_type_1, param_type_2, ...) -> return_type
+```
 where **param_type_n** is the type of the n-th parameter of the 
 function and **return_type** is the return type of the function.
 
-###### Pointer Type
+#### Pointer Type
 **Pointer Types** are for declaring pointers to a variable.
 They are declared in the following way:
-`*type`
+```c
+*type
+```
 where **type** is the type of the variable to pointer
 is pointing to.
 
-##### Structures
+### Structures
 
 ```c
 id {
@@ -178,7 +185,7 @@ Structures pretty much act like typedefined c-structs.
 **id** is the identifier of the structure and 
 inside the curly brackets are the variables the structure holds.
 
-##### Functions
+### Functions
 
 ```c
 function_id (var_id: type, ...) -> return_type 
@@ -193,7 +200,7 @@ A **Function** starts with its **identifier** followed by its **parameters** and
 In front of the **function body** all variables that will be used additionally to the paramters
 get defined and initiated.
 
-##### Statements
+### Statements
 
 There are four kinds of **Statements**.
 * Expression Statement
@@ -201,28 +208,37 @@ There are four kinds of **Statements**.
 * Jump Statement
 * Return Statement
 
-All **Statements** are terminated by a Semicolon.
+All **Statements** are terminated by a semicolon.
 
-###### Expression Statement
+#### Expression Statement
+Just a **Expression** terminated by a semicolon.
 
-###### Label Statement
-`label:`
-a **Label Statement** marks a line of code where one can jump 
+#### Label Statement
+```c
+label:
+```
+A **Label Statement** marks a line of code where one can jump 
 to with the **Jump Statement**.
 
-###### Jump Statement
+#### Jump Statement
 **Conditional Jump Statement:**
-`jmp exp label;`
+```c
+jmp exp label;
+```
 **Jump Statement:**
-`jmp label;`
+```c
+jmp label;
+```
 Continues execution at the specified label if the condition is met or if no
 condition is specified.
 
-###### Return Statement
-`ret exp;`
+#### Return Statement
+```c
+ret exp;
+```
 Returns the value of **exp** from the current function.
 
-##### Expressions
+### Expressions
 
 There are sic types of **Expressions**
 * Integer Expression
@@ -232,22 +248,22 @@ There are sic types of **Expressions**
 * Char Expression
 * Call Expression
 
-###### Integer Expression
+#### Integer Expression
 Just a integer literal `10` `2`
 
-###### Identifier Expression
+#### Identifier Expression
 Just a identifier `var` `foo`
 
-###### String Expression
+#### String Expression
 Just a ltring literal `"Hello"` `"World"`
 
-###### Char Expression
+#### Char Expression
 Just a char literal `'c'` `'\n'`
 
-###### Call Expression
+#### Call Expression
 ´(call_id param_1 param_2 ...)´
 A **Call Expression** ist mostly just a 
-function call, where the **function id** is is the first
+function call, where the **call_id** is is the first
 element in a list of expressions followed by its parameters,
 all inside round brackets.
 
@@ -256,7 +272,7 @@ function calls in c are also exposed through call expressions
 by some predefined c macros. 
 These macros are just prepended to the output. 
 
-##### Call Macro List:
+### Call Macro List:
 * set(lexp, rexp)   -> (lexp = rexp)   
 * ref(exp)          -> (&exp)          
 * deref(exp)        -> (*exp)          
