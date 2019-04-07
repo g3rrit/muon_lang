@@ -273,6 +273,7 @@ by some predefined c macros.
 These macros are just prepended to the output. 
 
 ### Call Macro List:
+
 * set(lexp, rexp)   -> (lexp = rexp)   
 * ref(exp)          -> (&exp)          
 * deref(exp)        -> (*exp)          
@@ -281,8 +282,9 @@ These macros are just prepended to the output.
 * aget(exp, index) (exp -> [index])    
 * cast(exp, type)   -> ((type)exp)     
 * size(exp)        (sizeof -> (exp))   
-* lst(...)          -> ( \__VA_ARGS\__ ) 
-* init(...)         -> { \__VA_ARGS\__ } 
+* lst(...)          -> ( \_\_VA_ARGS\_\_ ) 
+* init(...)         -> { \_\_VA_ARGS\_\_ } 
+
 **UNARY OPERATORS**
 * inc(exp)          -> (exp++)         
 * dec(exp)          -> (exp--)         
@@ -290,6 +292,7 @@ These macros are just prepended to the output.
 * neg(exp)          -> (-exp)          
 * bnot(exp)         -> (~exp)          
 * not(exp)          -> (!exp)          
+
 **BINARY_OPERATORS**
 * add(lexp, rexp)   -> (lexp + rexp)   
 * sub(lexp, rexp)   -> (lexp - rexp)   
