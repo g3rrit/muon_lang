@@ -261,7 +261,9 @@ Just a ltring literal `"Hello"` `"World"`
 Just a char literal `'c'` `'\n'`
 
 #### Call Expression
-´(call_id param_1 param_2 ...)´
+```c
+(call_id param_1 param_2 ...)
+```
 A **Call Expression** ist mostly just a 
 function call, where the **call_id** is is the first
 element in a list of expressions followed by its parameters,
