@@ -70,7 +70,7 @@ loop:
 }
 ```
 
-- produces ->
+produces ->
 
 ```c
 #define set(lexp, rexp)  (lexp = rexp)   
@@ -281,16 +281,16 @@ These macros are just prepended to the output.
 * aget(exp, index) (exp -> [index])    
 * cast(exp, type)   -> ((type)exp)     
 * size(exp)        (sizeof -> (exp))   
-* lst(...)          -> ( __VA_ARGS__ ) 
-* init(...)         -> { __VA_ARGS__ } 
-*UNARY OPERATORS*
+* lst(...)          -> ( \__VA_ARGS\__ ) 
+* init(...)         -> { \__VA_ARGS\__ } 
+**UNARY OPERATORS**
 * inc(exp)          -> (exp++)         
 * dec(exp)          -> (exp--)         
 * pos(exp)          -> (+exp)          
 * neg(exp)          -> (-exp)          
 * bnot(exp)         -> (~exp)          
 * not(exp)          -> (!exp)          
-*BINARY_OPERATORS*
+**BINARY_OPERATORS**
 * add(lexp, rexp)   -> (lexp + rexp)   
 * sub(lexp, rexp)   -> (lexp - rexp)   
 * mul(lexp, rexp)   -> (lexp * rexp)   
